@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+openai
+httpx
+pydantic
+python-dotenv
+litellm[proxy]
+rich>=13.8
+PyYAML
+python-multipart
+ncclient
+authlib
+itsdangerous

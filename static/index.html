@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NetCopilot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=Spectral:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #f3f7f7;
+        --ink: #1a2b2b;
+        --muted: #4e5f5f;
+        --accent: #01a982;
+        --accent-2: #008567;
+        --card: #ffffff;
+        --ring: rgba(1, 169, 130, 0.25);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", sans-serif;
+        color: var(--ink);
+        background: radial-gradient(circle at 10% 10%, #d9f3ec, transparent 40%),
+          radial-gradient(circle at 90% 20%, #e6f4f2, transparent 35%),
+          linear-gradient(180deg, #f9fcfb, var(--bg));
+        min-height: 100vh;
+      }
+
+      .shell {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 48px 24px 64px;
+      }
+
+      header {
+        display: grid;
+        gap: 24px;
+        align-items: end;
+      }
+
+      .brand {
+        font-family: "Spectral", serif;
+        font-size: clamp(28px, 4vw, 44px);
+        letter-spacing: 0.5px;
+        margin: 0;
+      }
+
+      .tagline {
+        color: var(--muted);
+        font-size: 16px;
+        max-width: 560px;
+        line-height: 1.6;
+      }
+
+      .hero {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+      }
+
+      .authbar {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        background: #fff;
+        border: 1px solid #e7ddce;
+        padding: 8px 12px;
+        border-radius: 999px;
+        box-shadow: 0 10px 20px rgba(27, 19, 10, 0.08);
+      }
+
+      .authbar span {
+        font-size: 12px;
+        color: var(--muted);
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .authbar button {
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: #1d3f66;
+        box-shadow: none;
+        font-size: 12px;
+      }
+
+      .authbar button.secondary {
+        background: #f7efe2;
+        color: var(--ink);
+        border: 1px solid #e7ddce;
+      }
+
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 24px;
+        margin-top: 36px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid #e0e7e6;
+        border-radius: 20px;
+        padding: 20px;
+        box-shadow: 0 18px 45px rgba(27, 19, 10, 0.08);
+      }
+
+      .card h2 {
+        font-size: 18px;
+        margin: 0 0 12px;
+      }
+
+      .chat {
+        display: grid;
+        gap: 12px;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 140px;
+        resize: vertical;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid #d3dddc;
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 15px;
+        background: #fffdf8;
+      }
+
+      input[type="text"] {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #d3dddc;
+        background: #fffdf8;
+        font-size: 14px;
+      }
+
+      button {
+        border: none;
+        background: var(--accent);
+        color: #fff;
+        padding: 12px 16px;
+        border-radius: 12px;
+        cursor: pointer;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        box-shadow: 0 10px 20px rgba(23, 107, 95, 0.2);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 12px 24px rgba(23, 107, 95, 0.3);
+      }
+
+      .meta {
+        display: grid;
+        gap: 10px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: #fff;
+        border: 1px solid #d9e2e1;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .reply {
+        background: #fff;
+        border-radius: 14px;
+        padding: 14px;
+        min-height: 560px;
+        max-height: 720px;
+        overflow: auto;
+        white-space: pre-wrap;
+        border: 1px dashed #cfe3df;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .footer {
+        margin-top: 28px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .settings-panel {
+        margin-top: 32px;
+      }
+
+      .settings-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .settings-row {
+        display: grid;
+        grid-template-columns: 1fr 1.2fr;
+        gap: 12px;
+        align-items: center;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid #e0e7e6;
+        background: #f7fbfa;
+      }
+
+      .settings-row strong {
+        font-size: 13px;
+      }
+
+      .settings-row small {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 4px;
+      }
+
+      .settings-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .settings-actions input {
+        flex: 1;
+      }
+
+      .spark {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        background: var(--accent-2);
+        border-radius: 50%;
+        margin-right: 8px;
+        animation: pulse 1.5s ease infinite;
+      }
+
+      @keyframes fadeInUp {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes pulse {
+        0% {
+          transform: scale(0.9);
+          opacity: 0.6;
+        }
+        70% {
+          transform: scale(1.4);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(0.9);
+          opacity: 0.6;
+        }
+      }
+
+      .card,
+      header {
+        animation: fadeInUp 0.6s ease;
+      }
+
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <div>
+          <div class="hero">
+            <div>
+              <div class="pill"><span class="spark"></span>NetCopilot Live</div>
+              <h1 class="brand">NetCopilot</h1>
+            </div>
+            <div class="authbar">
+              <span id="user">Not signed in</span>
+              <button id="login">Sign in</button>
+              <button id="logout" class="secondary">Sign out</button>
+            </div>
+          </div>
+          <p class="tagline">
+            An AI-powered network operations copilot. Ask in plain English, get
+            actionable diagnostics and verified evidence from your devices.
+          </p>
+        </div>
+      </header>
+
+      <div class="grid">
+        <section class="card chat">
+          <h2>Ask NetCopilot</h2>
+          <label>
+            User
+            <input id="user-input" type="text" placeholder="name@example.com" />
+          </label>
+          <label>
+            Message
+            <textarea id="message" placeholder="Check interface health on sandbox-iosxr-1 Gi0/0/0/0"></textarea>
+          </label>
+          <button id="send">Send</button>
+        </section>
+
+        <section class="card">
+          <h2>Reply</h2>
+          <div id="reply" class="reply">Waiting for a message...</div>
+        </section>
+      </div>
+
+      <section id="settings-card" class="card settings-panel" hidden>
+        <h2>Admin Settings</h2>
+        <p class="tagline" style="margin-top: 0">
+          Update integration settings without editing `.env`. Most changes require a server restart.
+        </p>
+        <div id="settings-list" class="settings-grid"></div>
+        <div class="settings-actions" style="margin-top: 16px">
+          <input id="custom-key" type="text" placeholder="Custom setting key" />
+          <input id="custom-value" type="text" placeholder="Custom setting value" />
+          <button id="add-setting">Add custom</button>
+        </div>
+        <div class="settings-actions" style="margin-top: 12px">
+          <button id="save-settings">Save settings</button>
+          <span id="settings-status" class="tagline"></span>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const messageEl = document.getElementById("message");
+      const userEl = document.getElementById("user-input");
+      const loginBtn = document.getElementById("login");
+      const logoutBtn = document.getElementById("logout");
+      const userBadge = document.getElementById("user");
+      const replyEl = document.getElementById("reply");
+      const sendBtn = document.getElementById("send");
+      const settingsCard = document.getElementById("settings-card");
+      const settingsList = document.getElementById("settings-list");
+      const saveSettingsBtn = document.getElementById("save-settings");
+      const addSettingBtn = document.getElementById("add-setting");
+      const customKeyEl = document.getElementById("custom-key");
+      const customValueEl = document.getElementById("custom-value");
+      const settingsStatus = document.getElementById("settings-status");
+      const settingsState = new Map();
+      let isAdmin = false;
+
+      async function sendMessage() {
+        const message = messageEl.value.trim();
+        const user = userEl.value.trim() || "unknown";
+        if (!message) {
+          replyEl.textContent = "Please enter a message.";
+          return;
+        }
+        replyEl.textContent = "Thinking...";
+        sendBtn.disabled = true;
+        try {
+          const response = await fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message, user }),
+          });
+          const data = await response.json();
+          if (data.reply) {
+            replyEl.textContent = data.reply;
+          } else {
+            replyEl.textContent = JSON.stringify(data, null, 2);
+          }
+        } catch (err) {
+          replyEl.textContent = `Error: ${err}`;
+        } finally {
+          sendBtn.disabled = false;
+        }
+      }
+
+      sendBtn.addEventListener("click", sendMessage);
+      messageEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          sendMessage();
+        }
+      });
+
+      async function refreshUser() {
+        try {
+          const resp = await fetch("/auth/me");
+          const data = await resp.json();
+          if (data.user && data.user.email) {
+            userBadge.textContent = `${data.user.name || data.user.email} (${data.user.role})`;
+            userEl.value = data.user.email;
+            isAdmin = data.user.role === "admin";
+          } else {
+            userBadge.textContent = "Not signed in";
+            isAdmin = false;
+          }
+        } catch (err) {
+          userBadge.textContent = "Auth check failed";
+          isAdmin = false;
+        }
+        if (isAdmin) {
+          settingsCard.hidden = false;
+          await loadSettings();
+        } else {
+          settingsCard.hidden = true;
+        }
+      }
+
+      async function loadSettings() {
+        try {
+          const resp = await fetch("/admin/settings");
+          const data = await resp.json();
+          settingsList.innerHTML = "";
+          settingsState.clear();
+          (data.settings || []).forEach((item) => {
+            const row = document.createElement("div");
+            row.className = "settings-row";
+            const left = document.createElement("div");
+            left.innerHTML = `<strong>${item.label}</strong><small>${item.key} · ${item.category}</small>`;
+            const right = document.createElement("div");
+            const input = document.createElement("input");
+            input.type = item.secret ? "password" : "text";
+            input.placeholder = item.secret && item.has_value ? "••••••••" : "";
+            input.value = item.secret ? "" : item.value || "";
+            input.dataset.key = item.key;
+            right.appendChild(input);
+            row.appendChild(left);
+            row.appendChild(right);
+            settingsList.appendChild(row);
+            settingsState.set(item.key, item);
+          });
+          const custom = data.custom_settings || {};
+          Object.entries(custom).forEach(([key, value]) => {
+            if (settingsState.has(key)) {
+              return;
+            }
+            const row = document.createElement("div");
+            row.className = "settings-row";
+            row.innerHTML = `
+              <div><strong>${key}</strong><small>custom</small></div>
+              <div><input type="text" data-key="${key}" value="${value}" /></div>
+            `;
+            settingsList.appendChild(row);
+            settingsState.set(key, { key, secret: false });
+          });
+        } catch (err) {
+          settingsStatus.textContent = "Failed to load settings.";
+        }
+      }
+
+      addSettingBtn.addEventListener("click", () => {
+        const key = customKeyEl.value.trim();
+        if (!key) {
+          settingsStatus.textContent = "Enter a custom key.";
+          return;
+        }
+        const row = document.createElement("div");
+        row.className = "settings-row";
+        row.innerHTML = `
+          <div><strong>${key}</strong><small>custom</small></div>
+          <div><input type="text" data-key="${key}" value="${customValueEl.value.trim()}" /></div>
+        `;
+        settingsList.appendChild(row);
+        settingsState.set(key, { key, secret: false });
+        customKeyEl.value = "";
+        customValueEl.value = "";
+        settingsStatus.textContent = "Custom setting added.";
+      });
+
+      saveSettingsBtn.addEventListener("click", async () => {
+        const payload = {};
+        const inputs = settingsList.querySelectorAll("input[data-key]");
+        inputs.forEach((input) => {
+          const key = input.dataset.key;
+          const meta = settingsState.get(key) || {};
+          const value = input.value;
+          if (meta.secret && !value) {
+            return;
+          }
+          if (!meta.secret && value === "********" && /secret|token|pass|key/i.test(key)) {
+            return;
+          }
+          payload[key] = value;
+        });
+        settingsStatus.textContent = "Saving...";
+        try {
+          const resp = await fetch("/admin/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ settings: payload }),
+          });
+          const data = await resp.json();
+          if (data.status === "ok") {
+            settingsStatus.textContent =
+              "Saved. Restart the server to apply changes.";
+            await loadSettings();
+          } else {
+            settingsStatus.textContent = JSON.stringify(data);
+          }
+        } catch (err) {
+          settingsStatus.textContent = `Error: ${err}`;
+        }
+      });
+
+      loginBtn.addEventListener("click", () => {
+        window.location.href = "/auth/login";
+      });
+
+      logoutBtn.addEventListener("click", () => {
+        window.location.href = "/auth/logout";
+      });
+
+      refreshUser();
+    </script>
+  </body>
+</html>

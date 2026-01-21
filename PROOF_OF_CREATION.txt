@@ -1,0 +1,18 @@
+NetCopilot Proof of Creation
+
+Project: NetCopilot
+Owner: Syed Haq
+Created (UTC): 2026-01-19T23:55:25Z
+
+This document records a snapshot hash of key project files at the timestamp above.
+
+SHA256:
+6d4773cfddf5cdf065abb58526623f6c2b6e8df81c4e88d44b3581d2223b0d64  app.py
+22287a90e16406db46e7858f5c2e00ec0ac05b5c67ec9e095611ffea5248833d  llm/prompts.py
+c6722f6b4f0366d6e8519853c58eba491cc6e7f721ab6e178ba0ca0381fde7de  llm/tools.py
+f09c8c1f42fd0ebdb5d85bb4ef26895aef4c27d5c5a639613a62c7d958b0e658  tools/flapping.py
+adb1d2f837f2b327246f514db5cbd286e5b473df4a79f778df0fc8823afc9b74  static/index.html
+5327216f54744ff79ef16c56d1d992e721ee1570e12f91cd87526a7c56e3009e  config.py
+61aade098c036403996f736ff39e761b8a21905e32cb89aff2d20f199d896942  devices/iosxr.py
+3d332811fe515a1c81d7900a9f448e4ae77383cc48341a441cdb31ff58193abd  devices/junos.py
+f878631703a65f98f4c868dc4c7273015a91e8c9978fb1c62d2d6507a7591ea7  settings.py

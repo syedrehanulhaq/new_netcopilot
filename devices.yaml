@@ -1,0 +1,7 @@
+cisco_devices:
+  sandbox-iosxr-1: sandbox-iosxr-1.cisco.com
+juniper_devices:
+  sandbox-junos-1: "66.129.234.203:45003"
+  sandbox-junos-2: "66.129.234.203:45007"
+nokia_devices: {}
+

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <defs>
+    <style>
+      .title { font: 600 22px "Arial", sans-serif; fill: #0b2f2f; }
+      .label { font: 600 16px "Arial", sans-serif; fill: #0b2f2f; }
+      .text { font: 14px "Arial", sans-serif; fill: #1a2b2b; }
+      .box { fill: #ffffff; stroke: #01a982; stroke-width: 2; rx: 16; ry: 16; }
+      .subbox { fill: #f4fbf9; stroke: #9ad6c9; stroke-width: 1.5; rx: 12; ry: 12; }
+      .lane { fill: #f0f6f6; stroke: #cfe3df; stroke-width: 1; rx: 20; ry: 20; }
+      .arrow { stroke: #1a6b63; stroke-width: 2; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1a6b63"/>
+    </marker>
+  </defs>
+
+  <rect x="24" y="24" width="1152" height="672" rx="28" ry="28" fill="#f3f7f7" stroke="#d6e5e3" stroke-width="2"/>
+  <text x="60" y="70" class="title">NetCopilot Architecture (Sales Diagram)</text>
+
+  <rect x="60" y="110" width="220" height="520" class="lane"/>
+  <text x="85" y="145" class="label">User Channels</text>
+  <rect x="80" y="180" width="180" height="70" class="subbox"/>
+  <text x="110" y="220" class="text">Web UI</text>
+  <rect x="80" y="270" width="180" height="70" class="subbox"/>
+  <text x="110" y="310" class="text">Slack</text>
+  <rect x="80" y="360" width="180" height="70" class="subbox"/>
+  <text x="110" y="400" class="text">Teams</text>
+
+  <rect x="320" y="150" width="380" height="200" class="box"/>
+  <text x="340" y="185" class="label">NetCopilot API</text>
+  <text x="340" y="210" class="text">FastAPI + Tool Orchestrator</text>
+  <text x="340" y="235" class="text">RBAC + Audit + Memory</text>
+
+  <rect x="740" y="150" width="380" height="200" class="box"/>
+  <text x="760" y="185" class="label">LLM Provider</text>
+  <text x="760" y="210" class="text">OpenAI / Azure / Bedrock / Local</text>
+  <text x="760" y="235" class="text">Prompt + Tool Calling</text>
+
+  <rect x="320" y="400" width="800" height="230" class="box"/>
+  <text x="340" y="435" class="label">Tools + Integrations</text>
+  <rect x="340" y="460" width="170" height="140" class="subbox"/>
+  <text x="360" y="490" class="text">Devices</text>
+  <text x="360" y="515" class="text">IOS XR / Junos</text>
+  <text x="360" y="540" class="text">CLI + NETCONF</text>
+
+  <rect x="530" y="460" width="170" height="140" class="subbox"/>
+  <text x="550" y="490" class="text">Inventory</text>
+  <text x="550" y="515" class="text">NetBox</text>
+
+  <rect x="720" y="460" width="170" height="140" class="subbox"/>
+  <text x="740" y="490" class="text">Observability</text>
+  <text x="740" y="515" class="text">Prometheus</text>
+  <text x="740" y="540" class="text">Syslog / Telemetry</text>
+
+  <rect x="910" y="460" width="170" height="140" class="subbox"/>
+  <text x="930" y="490" class="text">Ticketing</text>
+  <text x="930" y="515" class="text">Jira / ServiceNow</text>
+
+  <line x1="260" y1="230" x2="320" y2="230" class="arrow"/>
+  <line x1="260" y1="320" x2="320" y2="230" class="arrow"/>
+  <line x1="260" y1="410" x2="320" y2="230" class="arrow"/>
+  <line x1="700" y1="230" x2="740" y2="230" class="arrow"/>
+  <line x1="510" y1="350" x2="510" y2="400" class="arrow"/>
+  <line x1="930" y1="350" x2="930" y2="400" class="arrow"/>
+</svg>
