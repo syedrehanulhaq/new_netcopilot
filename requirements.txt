@@ -1,13 +1,30 @@
+# NetCopilot core
 fastapi
 uvicorn[standard]
 openai
 httpx
 pydantic
 python-dotenv
-litellm[proxy]
-rich>=13.8
 PyYAML
 python-multipart
-ncclient
-authlib
 itsdangerous
+
+# Auth
+authlib
+
+# LLM provider abstraction (optional local LLM support)
+litellm[proxy]
+rich>=13.8
+
+# MCP framework (server + client)
+mcp[cli]
+
+# Device adapters
+netmiko           # SSH to all vendors (Cisco, Nokia SR OS)
+ncclient          # NETCONF for Cisco IOS XR and Nokia SR OS
+junos-eznc        # PyEZ for Junos (NETCONF-based, vendor-supported)
+lxml              # XML parsing used by ncclient + PyEZ
+
+# Vendor MCP servers (run as Docker sidecars in production)
+# Listed here so local dev can run them with: uvx mcp-atlassian --transport sse --port 8104
+mcp-atlassian     # Jira — 65 tools, maintained by sooperset/mcp-atlassian

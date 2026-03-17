@@ -1,7 +1,67 @@
-cisco_devices:
-  sandbox-iosxr-1: sandbox-iosxr-1.cisco.com
-juniper_devices:
-  sandbox-junos-1: "66.129.234.203:45003"
-  sandbox-junos-2: "66.129.234.203:45007"
-nokia_devices: {}
+# NetCopilot Device Registry
+#
+# Format:
+#   device_name:
+#     host: hostname_or_ip       (required)
+#     port: ssh_port             (optional, defaults: SSH=22, NETCONF=830)
+#     vendor: cisco|junos|nokia  (required — deterministic routing, no LLM guessing)
+#     platform: iosxr|junos|sros (optional, for vendor sub-type)
+#     site: site_code            (optional, informational)
+#     netconf_port: 830          (optional override)
 
+devices:
+  sandbox-iosxr-1:
+    host: sandbox-iosxr-1.cisco.com
+    vendor: cisco
+    platform: iosxr
+    site: devnet-sandbox
+
+  sandbox-junos-1:
+    host: 66.129.234.203
+    port: 45003
+    vendor: junos
+    platform: junos
+    site: devnet-sandbox
+
+  sandbox-junos-2:
+    host: 66.129.234.203
+    port: 45007
+    vendor: junos
+    platform: junos
+    site: devnet-sandbox
+
+  pe1:
+    host: 66.129.234.213
+    port: 33045
+    vendor: junos
+    platform: junos
+
+  p5:
+    host: 66.129.234.213
+    port: 33033
+    vendor: junos
+    platform: junos
+
+  pe2:
+    host: 66.129.234.213
+    port: 33048
+    vendor: junos
+    platform: junos
+
+  sw1:
+    host: 66.129.234.200
+    port: 37003
+    vendor: junos
+    platform: junos
+
+  sw2:
+    host: 66.129.234.200
+    port: 37007
+    vendor: junos
+    platform: junos
+
+  srx:
+    host: 66.129.234.202
+    port: 41018
+    vendor: junos
+    platform: junos

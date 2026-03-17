@@ -1,0 +1,337 @@
+"""
+Tool Dispatcher — routes tool calls to the right backend.
+
+  Device tools      (cisco_*, junos_*, nokia_*) → direct Python adapters
+  Integration tools (jira_*, prometheus_*, syslog_*) → direct Python adapters
+                    (jiravnd_*)                      → MCPClient (mcp-atlassian)
+  Playbook tool     (run_playbook)                  → PlaybookRunner
+
+Device adapters and integration adapters are all in-process.
+Vendor MCP servers (mcp-atlassian etc.) run as Docker sidecars; the
+MCPClient connects to them over SSE/streamable-http at startup.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Callable, Optional
+
+from adapters.devices.registry import get_vendor, correct_tool_vendor, list_devices
+
+logger = logging.getLogger("netcopilot.dispatcher")
+
+# Vendor prefix → module path (direct adapters)
+_VENDOR_MODULES: dict[str, str] = {
+    "cisco": "adapters.devices.cisco",
+    "junos":  "adapters.devices.junos",
+    "nokia":  "adapters.devices.nokia",
+}
+
+# Integration prefix → module path (direct adapters)
+_INTEGRATION_MODULES: dict[str, str] = {
+    "jira":       "adapters.integrations.jira",
+    "prometheus": "adapters.integrations.prometheus",
+    "syslog":     "adapters.integrations.syslog",
+}
+
+_DEVICE_PREFIXES      = tuple(f"{v}_" for v in _VENDOR_MODULES)
+_INTEGRATION_PREFIXES = tuple(f"{v}_" for v in _INTEGRATION_MODULES)
+
+
+def _is_device_tool(tool_name: str) -> bool:
+    return any(tool_name.startswith(p) for p in _DEVICE_PREFIXES)
+
+
+def _is_integration_tool(tool_name: str) -> bool:
+    return any(tool_name.startswith(p) for p in _INTEGRATION_PREFIXES)
+
+
+def _load_module(mod_name: str):
+    import importlib
+    return importlib.import_module(mod_name)
+
+
+# Role access for integration adapters
+_INTEGRATION_ROLES: dict[str, set[str]] = {
+    "jira":       {"admin", "noc-ticket"},
+    "prometheus": {"admin", "noc-ticket", "noc"},
+    "syslog":     {"admin", "noc-ticket", "noc"},
+}
+
+
+class ToolDispatcher:
+    """
+    Central dispatcher called by _agentic_loop in app.py.
+
+    Usage:
+        dispatcher = ToolDispatcher(mcp_client=_mcp)
+        result = await dispatcher.call_tool("cisco_get_cpu_memory", {"device": "pe1"})
+        result = await dispatcher.call_tool("run_playbook", {"intent": "bgp_down", "device": "pe1"})
+    """
+
+    def __init__(self, mcp_client=None):
+        self._mcp = mcp_client   # MCPClient for vendor MCP servers (mcp-atlassian etc.)
+
+    # ------------------------------------------------------------------
+    # Tool list (called by _run_chat / _agentic_loop)
+    # ------------------------------------------------------------------
+
+    def get_all_tools(self, role: str) -> list[dict]:
+        """
+        Return combined tool list for the given role:
+          - Device adapter tools (all roles)
+          - Integration adapter tools (role-filtered)
+          - Vendor MCP server tools (role-filtered via MCPClient)
+          - run_playbook meta-tool (all roles)
+        """
+        tools: list[dict] = []
+
+        # Device adapter tools
+        for vendor, mod_name in _VENDOR_MODULES.items():
+            try:
+                mod = _load_module(mod_name)
+                tools.extend(getattr(mod, "TOOL_SCHEMAS", []))
+            except Exception as exc:
+                logger.warning("Could not load tool schemas for %s: %s", vendor, exc)
+
+        # Direct integration adapter tools (role-filtered)
+        # Skip any prefix that a vendor MCP server already covers to avoid duplicates
+        mcp_prefixes: set[str] = set()
+        if self._mcp:
+            for tool_name in self._mcp.tool_to_server:
+                prefix = tool_name.split("_", 1)[0]
+                mcp_prefixes.add(prefix)
+
+        for prefix, mod_name in _INTEGRATION_MODULES.items():
+            allowed_roles = _INTEGRATION_ROLES.get(prefix, {"admin", "noc-ticket", "noc"})
+            if role not in allowed_roles:
+                continue
+            if prefix in mcp_prefixes:
+                # Vendor MCP server covers this prefix — skip direct adapter schemas
+                # (direct adapter still handles Slack handler's legacy tool names)
+                continue
+            try:
+                mod = _load_module(mod_name)
+                tools.extend(getattr(mod, "TOOL_SCHEMAS", []))
+            except Exception as exc:
+                logger.warning("Could not load tool schemas for %s: %s", prefix, exc)
+
+        # Vendor MCP server tools (mcp-atlassian etc.)
+        if self._mcp:
+            try:
+                tools.extend(self._mcp.get_tools(role))
+            except Exception as exc:
+                logger.warning("Could not get MCP tools: %s", exc)
+
+        # Playbook meta-tool (all roles)
+        tools.append(_PLAYBOOK_SCHEMA)
+
+        return tools
+
+    # ------------------------------------------------------------------
+    # Tool dispatch
+    # ------------------------------------------------------------------
+
+    async def call_tool(self, tool_name: str, arguments: dict) -> Any:
+        """Route a tool call to the correct backend."""
+
+        # Playbook runner
+        if tool_name == "run_playbook":
+            return await self._run_playbook(arguments)
+
+        # Vendor correction for device tools
+        device = arguments.get("device", "")
+        if device and _is_device_tool(tool_name):
+            tool_name = correct_tool_vendor(tool_name, device)
+
+        if _is_device_tool(tool_name):
+            return await self._call_adapter_tool(tool_name, arguments, _VENDOR_MODULES)
+
+        # Integration tools: check vendor MCP first (has richer tool set),
+        # then fall back to direct adapter (keeps legacy Slack handler working)
+        if _is_integration_tool(tool_name):
+            if self._mcp and tool_name in self._mcp.tool_to_server:
+                return await self._call_mcp_tool(tool_name, arguments)
+            return await self._call_adapter_tool(tool_name, arguments, _INTEGRATION_MODULES)
+
+        # Unknown prefix — try vendor MCP servers (e.g. jiravnd_*)
+        if self._mcp and tool_name in self._mcp.tool_to_server:
+            return await self._call_mcp_tool(tool_name, arguments)
+
+        logger.warning("Unknown tool '%s'", tool_name)
+        return {"error": f"Unknown tool '{tool_name}'"}
+
+    async def call_tool_unprefixed(self, tool_name: str, arguments: dict) -> Any:
+        """
+        Playbook runner entry point — tool_name has NO vendor prefix.
+        Looks up the device's vendor from the registry and prefixes automatically.
+
+        Example: call_tool_unprefixed("get_bgp_summary", {"device": "pe1"})
+                 → internally calls call_tool("junos_get_bgp_summary", {"device": "pe1"})
+        """
+        device = arguments.get("device", "")
+        if device:
+            vendor = get_vendor(device)
+            if vendor:
+                return await self.call_tool(f"{vendor}_{tool_name}", arguments)
+        # No device or unknown device — try direct (integration tools, prometheus etc.)
+        return await self.call_tool(tool_name, arguments)
+
+    # ------------------------------------------------------------------
+    # Internal dispatch helpers
+    # ------------------------------------------------------------------
+
+    async def _call_adapter_tool(
+        self,
+        tool_name: str,
+        arguments: dict,
+        module_map: dict[str, str],
+    ) -> Any:
+        prefix, _, base_name = tool_name.partition("_")
+        if not base_name:
+            return {"error": f"Malformed tool name '{tool_name}'"}
+
+        mod_name = module_map.get(prefix)
+        if not mod_name:
+            return {"error": f"No adapter module for prefix '{prefix}'"}
+
+        try:
+            mod = _load_module(mod_name)
+        except Exception as exc:
+            return {"error": f"Failed to load adapter '{prefix}': {exc}"}
+
+        tools_map: dict[str, Callable] = getattr(mod, "TOOLS", {})
+        func = tools_map.get(base_name)
+        if not func:
+            return {"error": f"Tool '{base_name}' not found in '{prefix}' adapter"}
+
+        try:
+            return await func(**arguments)
+        except TypeError as exc:
+            logger.error("Tool %s called with wrong args %s: %s", tool_name, arguments, exc)
+            return {"error": f"Invalid arguments for '{tool_name}': {exc}"}
+        except Exception as exc:
+            logger.exception("Tool %s failed: %s", tool_name, exc)
+            return {"error": f"Tool execution failed: {exc}"}
+
+    async def _call_mcp_tool(self, tool_name: str, arguments: dict) -> Any:
+        try:
+            return await self._mcp.call_tool(tool_name, arguments)
+        except Exception as exc:
+            logger.exception("MCP tool %s failed: %s", tool_name, exc)
+            return {"error": f"MCP tool execution failed: {exc}"}
+
+    async def _run_playbook(self, arguments: dict) -> dict:
+        """Execute a structured diagnostic playbook and return severity + evidence."""
+        from playbooks.runner import get_runner
+
+        intent = arguments.get("intent", "")
+        if not intent:
+            return {"error": "run_playbook requires 'intent' argument"}
+
+        # All non-intent args become playbook params (device, interface, neighbor, prefix…)
+        params = {k: v for k, v in arguments.items() if k != "intent" and v is not None}
+
+        try:
+            runner = get_runner()
+            result = await runner.run(
+                intent=intent,
+                params=params,
+                tool_caller=self.call_tool_unprefixed,
+            )
+        except Exception as exc:
+            logger.exception("Playbook runner failed for intent=%s: %s", intent, exc)
+            return {"error": f"Playbook execution failed: {exc}"}
+
+        return {
+            "playbook": result.playbook_name,
+            "severity": result.severity,
+            "evidence": result.evidence,
+            "summary": result.summary_text,
+            "steps_run": len(result.steps),
+            "elapsed_ms": round(result.elapsed_ms),
+            **({"error": result.error} if result.error else {}),
+        }
+
+    # ------------------------------------------------------------------
+    # Status (for /health endpoint)
+    # ------------------------------------------------------------------
+
+    def server_status(self) -> list[dict]:
+        """Return status for all backends."""
+        status: list[dict] = []
+
+        for vendor, mod_name in _VENDOR_MODULES.items():
+            try:
+                mod = _load_module(mod_name)
+                status.append({"name": vendor, "type": "device_adapter",
+                                "connected": True, "tools": len(getattr(mod, "TOOLS", {}))})
+            except Exception:
+                status.append({"name": vendor, "type": "device_adapter",
+                                "connected": False, "tools": 0})
+
+        for prefix, mod_name in _INTEGRATION_MODULES.items():
+            try:
+                mod = _load_module(mod_name)
+                status.append({"name": prefix, "type": "integration_adapter",
+                                "connected": True, "tools": len(getattr(mod, "TOOLS", {}))})
+            except Exception:
+                status.append({"name": prefix, "type": "integration_adapter",
+                                "connected": False, "tools": 0})
+
+        if self._mcp:
+            for srv in self._mcp.server_status():
+                srv["type"] = "vendor_mcp"
+                status.append(srv)
+
+        return status
+
+
+# ------------------------------------------------------------------
+# run_playbook tool schema (injected into get_all_tools for all roles)
+# ------------------------------------------------------------------
+
+_PLAYBOOK_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "run_playbook",
+        "description": (
+            "Run a structured diagnostic playbook for a known issue pattern. "
+            "Executes a fixed sequence of diagnostic tools, evaluates severity rules, "
+            "and returns a severity assessment (Critical/Warning/Info) with evidence. "
+            "Use this when you identify a specific issue type on a device."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "intent": {
+                    "type": "string",
+                    "enum": [
+                        "link_down", "link_flap", "crc_errors",
+                        "bgp_down", "bgp_active",
+                        "isis_down", "route_missing",
+                        "cpu_high", "hardware_fault",
+                    ],
+                    "description": "The issue pattern to investigate.",
+                },
+                "device": {
+                    "type": "string",
+                    "description": "Primary device to investigate.",
+                },
+                "interface": {
+                    "type": "string",
+                    "description": "Interface name — required for link_down, link_flap, crc_errors.",
+                },
+                "neighbor": {
+                    "type": "string",
+                    "description": "BGP neighbor IP — required for bgp_down, bgp_active.",
+                },
+                "prefix": {
+                    "type": "string",
+                    "description": "Route prefix — required for route_missing.",
+                },
+            },
+            "required": ["intent", "device"],
+        },
+    },
+}

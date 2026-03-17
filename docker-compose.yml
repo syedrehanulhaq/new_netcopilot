@@ -1,0 +1,122 @@
+version: "3.9"
+
+# NetCopilot — Production deployment
+#
+# Usage:
+#   cp .env.example .env          # fill in credentials
+#   docker-compose up -d
+#   docker-compose logs -f app    # tail app logs
+#
+# Volumes:
+#   netcopilot_data  — SQLite DBs (settings, memory, alerts, playbooks)
+#   netcopilot_logs  — structured JSON logs
+#
+# Secrets:
+#   All credentials are injected via environment variables from .env
+#   For Vault integration: set VAULT_ADDR, VAULT_TOKEN, VAULT_SECRET_PATH
+
+x-common-env: &common-env
+  TZ: UTC
+  PYTHONUNBUFFERED: "1"
+
+x-device-env: &device-env
+  JUNIPER_USER: ${JUNIPER_USER}
+  JUNIPER_PASS: ${JUNIPER_PASS}
+  CISCO_USER: ${CISCO_USER}
+  CISCO_PASS: ${CISCO_PASS}
+  NOKIA_USER: ${NOKIA_USER:-admin}
+  NOKIA_PASS: ${NOKIA_PASS}
+  NETCONF_PORT: ${NETCONF_PORT:-830}
+  NETCONF_TIMEOUT: ${NETCONF_TIMEOUT:-30}
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Main FastAPI application (single container — no MCP sidecar processes)
+  # ---------------------------------------------------------------------------
+  app:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    image: netcopilot:latest
+    ports:
+      - "${APP_PORT:-8001}:8001"
+    environment:
+      <<: [*common-env, *device-env]
+      # LLM
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      # Auth
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
+      AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
+      SESSION_SECRET: ${SESSION_SECRET}
+      # Integrations (direct in-process adapters — no MCP servers needed)
+      JIRA_BASE_URL: ${JIRA_BASE_URL}
+      JIRA_EMAIL: ${JIRA_EMAIL}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN}
+      JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-NOC}
+      JIRA_DEFAULT_ISSUE_TYPE: ${JIRA_DEFAULT_ISSUE_TYPE:-Task}
+      JIRA_DEFAULT_PRIORITY: ${JIRA_DEFAULT_PRIORITY:-Medium}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
+      SLACK_ALERT_CHANNEL: ${SLACK_ALERT_CHANNEL}
+      PROMETHEUS_URL: ${PROMETHEUS_URL}
+      PROMETHEUS_FLAP_QUERY: ${PROMETHEUS_FLAP_QUERY}
+      SYSLOG_URL: ${SYSLOG_URL}
+      SYSLOG_TOKEN: ${SYSLOG_TOKEN}
+      # Vault (optional — if set, credentials are read from Vault instead of env)
+      VAULT_ADDR: ${VAULT_ADDR}
+      VAULT_TOKEN: ${VAULT_TOKEN}
+      VAULT_SECRET_PATH: ${VAULT_SECRET_PATH:-secret/netcopilot}
+      # MCP server URL overrides (Docker hostnames differ from mcp_servers.yaml defaults)
+      JIRA_MCP_URL: http://jira-mcp:8104/sse
+    volumes:
+      - netcopilot_data:/app/data
+      - netcopilot_logs:/app/logs
+      - ./devices.yaml:/app/devices.yaml:ro
+      - ./playbooks/playbooks.yaml:/app/playbooks/playbooks.yaml:ro
+    depends_on:
+      jira-mcp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Jira MCP server — mcp-atlassian (vendor-maintained, 65 Jira tools)
+  # Replaces our hand-rolled jira.py for LLM-initiated Jira operations.
+  # ---------------------------------------------------------------------------
+  jira-mcp:
+    restart: unless-stopped
+    image: ghcr.io/sooperset/mcp-atlassian:latest
+    environment:
+      TZ: UTC
+      TRANSPORT: sse
+      PORT: "8104"
+      JIRA_URL: ${JIRA_BASE_URL}
+      JIRA_USERNAME: ${JIRA_EMAIL}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8104/sse"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  netcopilot_data:
+    driver: local
+  netcopilot_logs:
+    driver: local

@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netcopilot
+  namespace: netcopilot-prod
+  labels:
+    app: netcopilot
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: netcopilot
+  template:
+    metadata:
+      labels:
+        app: netcopilot
+    spec:
+      serviceAccountName: netcopilot
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: netcopilot
+          image: netcopilot:prod
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8001
+          envFrom:
+            - configMapRef:
+                name: netcopilot-config
+            - secretRef:
+                name: netcopilot-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: devices
+              mountPath: /app/devices.yaml
+              subPath: devices.yaml
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: netcopilot-data
+        - name: devices
+          configMap:
+            name: netcopilot-devices

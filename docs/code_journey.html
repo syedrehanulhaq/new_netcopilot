@@ -1,0 +1,1765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NetCopilot — Complete Code Journey</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--bg2:#161b22;--bg3:#1c2128;--bg4:#21262d;
+  --border:#30363d;--text:#e6edf3;--muted:#7d8590;--dim:#484f58;
+  --blue:#388bfd;--blue-d:#0d2044;--blue-b:#1f4e91;
+  --purple:#bc8cff;--purple-d:#1e1133;--purple-b:#6e3fbd;
+  --green:#3fb950;--green-d:#0d2a16;--green-b:#1a5c2a;
+  --yellow:#d29922;--yellow-d:#2a1c00;--yellow-b:#5a3d00;
+  --orange:#f0883e;--orange-d:#2a1200;--orange-b:#5a2a00;
+  --red:#f85149;--red-d:#2d0f0f;--red-b:#6e1c1c;
+  --cyan:#79c0ff;--teal:#39d353;--pink:#ff7b72;
+}
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+
+/* NAV */
+.nav{position:sticky;top:0;z-index:100;background:rgba(13,17,23,.97);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.nav-title{font-size:.8rem;font-weight:800;color:var(--text);margin-right:4px;white-space:nowrap}
+.nav a{font-size:.63rem;font-weight:600;padding:2px 8px;border-radius:20px;border:1px solid var(--border);color:var(--muted);text-decoration:none;white-space:nowrap;transition:all .15s}
+.nav a:hover{color:var(--text);border-color:var(--dim)}
+
+.page{max-width:980px;margin:0 auto;padding:32px 20px 80px}
+
+/* HERO */
+.hero{text-align:center;padding:32px 0 36px;border-bottom:1px solid var(--border);margin-bottom:40px}
+.hero h1{font-size:1.7rem;font-weight:800;color:#f0f6fc;margin-bottom:8px}
+.hero p{font-size:.83rem;color:var(--muted);max-width:580px;margin:0 auto}
+
+/* FILE ROLES TABLE */
+.roles-section{margin-bottom:48px}
+.roles-title{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:14px}
+.roles-table{width:100%;border-collapse:collapse;font-size:.7rem}
+.roles-table th{text-align:left;padding:6px 10px;border-bottom:2px solid var(--border);color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;font-size:.63rem}
+.roles-table td{padding:6px 10px;border-bottom:1px solid var(--border);vertical-align:top;line-height:1.5}
+.roles-table tr:hover td{background:var(--bg2)}
+.roles-table td:first-child{font-family:monospace;color:var(--cyan);white-space:nowrap}
+.roles-table td:nth-child(2){color:var(--yellow)}
+.roles-table td:nth-child(3){color:var(--muted)}
+
+/* STEP */
+.step{display:grid;grid-template-columns:72px 1fr;margin-bottom:0;position:relative}
+.step-connector{display:flex;flex-direction:column;align-items:center}
+.step-circle{width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.2rem;border:2px solid;flex-shrink:0;position:relative;z-index:2;margin-top:8px}
+.step-line{width:2px;flex:1;min-height:20px}
+.step-body{padding:6px 0 32px 14px}
+.step-header{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px}
+.step-title{font-size:.98rem;font-weight:700;line-height:1.3}
+.step-subtitle{font-size:.7rem;color:var(--muted);margin-top:2px;line-height:1.5}
+
+/* FILE BADGE */
+.file-badge{display:inline-flex;align-items:center;gap:5px;border-radius:6px;padding:3px 9px;font-size:.68rem;font-weight:600;font-family:monospace;border:1px solid;margin:0 4px 6px 0;white-space:nowrap}
+
+/* CALL CHAIN */
+.call-chain{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:12px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px}
+.cc-label{font-size:.6rem;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.07em;margin-right:4px;white-space:nowrap}
+.cc-fn{display:inline-block;font-family:monospace;font-size:.68rem;font-weight:600;color:var(--cyan);background:rgba(121,192,255,.08);padding:2px 7px;border-radius:4px;border:1px solid rgba(121,192,255,.2);white-space:nowrap}
+.cc-file{font-family:monospace;font-size:.59rem;color:var(--dim);display:inline-block;vertical-align:top;margin-top:1px}
+.cc-arr{color:var(--dim);font-size:.85rem;padding:0 1px}
+.cc-ext{color:var(--orange);background:rgba(240,136,62,.08);border-color:rgba(240,136,62,.3)}
+
+/* PAYLOAD ROW */
+.payload-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+@media(max-width:620px){.payload-row{grid-template-columns:1fr}}
+.payload-panel{border-radius:8px;border:1px solid;overflow:hidden;font-size:.68rem}
+.payload-panel.pp-in{border-color:var(--blue-b)}
+.payload-panel.pp-out{border-color:var(--green-b)}
+.payload-panel.pp-warn{border-color:var(--yellow-b)}
+.pp-label{padding:4px 10px;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;display:flex;align-items:center;gap:5px}
+.pp-in .pp-label{background:var(--blue-d);color:var(--blue)}
+.pp-out .pp-label{background:var(--green-d);color:var(--green)}
+.pp-warn .pp-label{background:var(--yellow-d);color:var(--yellow)}
+.pp-body{padding:10px 12px;font-family:'SFMono-Regular',Consolas,monospace;background:var(--bg);color:var(--text);overflow-x:auto;white-space:pre;line-height:1.6}
+
+/* CODE BLOCK */
+.code-block{border-radius:8px;border:1px solid var(--border);background:#0d1117;overflow:hidden;margin-bottom:10px}
+.code-header{background:var(--bg3);border-bottom:1px solid var(--border);padding:6px 12px;display:flex;align-items:center;justify-content:space-between}
+.code-filename{font-size:.67rem;font-family:monospace;color:var(--muted)}
+.code-label{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)}
+.code-body{padding:12px 14px;font-family:'SFMono-Regular',Consolas,monospace;font-size:.71rem;line-height:1.7;overflow-x:auto;white-space:pre}
+
+/* syntax */
+.kw{color:var(--pink)}.fn{color:var(--blue)}.str{color:var(--teal)}.cm{color:var(--dim)}.var{color:var(--cyan)}.num{color:var(--orange)}.cls{color:var(--yellow)}.hi{background:rgba(56,139,253,.15);border-radius:3px;padding:0 3px}
+
+/* EXPLAIN */
+.explain{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:11px 14px;font-size:.72rem;color:var(--muted);line-height:1.7;margin-bottom:10px}
+.explain strong{color:var(--text)}.explain .em{color:var(--yellow);font-weight:600}
+
+/* WHAT HAPPENS */
+.wh-row{display:flex;gap:8px;align-items:stretch;margin-bottom:10px;flex-wrap:wrap}
+.wh-box{flex:1;min-width:120px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);padding:9px 11px;font-size:.69rem;text-align:center}
+.wh-icon{font-size:1.2rem;margin-bottom:4px}.wh-title{font-weight:700;font-size:.7rem;margin-bottom:2px}.wh-body{color:var(--muted);font-size:.65rem;line-height:1.5}
+.wh-arr{display:flex;align-items:center;color:var(--dim);font-size:.85rem;flex-shrink:0}
+
+/* RESULT BOX */
+.result-box{border-radius:8px;padding:11px 14px;font-size:.71rem;border:1px solid;margin-bottom:6px}
+.result-info{background:var(--blue-d);border-color:var(--blue-b);color:var(--blue)}
+.result-good{background:var(--green-d);border-color:var(--green-b);color:var(--green)}
+.result-warn{background:var(--yellow-d);border-color:var(--yellow-b);color:var(--yellow)}
+
+/* PILLS */
+.pill{display:inline-block;border-radius:20px;padding:1px 8px;font-size:.62rem;font-weight:600;border:1px solid;vertical-align:middle;margin:1px}
+.p-blue{color:var(--blue);border-color:var(--blue-b);background:rgba(56,139,253,.08)}
+.p-purple{color:var(--purple);border-color:var(--purple-b);background:rgba(188,140,255,.08)}
+.p-green{color:var(--green);border-color:var(--green-b);background:rgba(63,185,80,.08)}
+.p-yellow{color:var(--yellow);border-color:var(--yellow-b);background:rgba(210,153,34,.08)}
+.p-orange{color:var(--orange);border-color:var(--orange-b);background:rgba(240,136,62,.08)}
+.p-red{color:var(--red);border-color:var(--red-b);background:rgba(248,81,73,.08)}
+.p-muted{color:var(--muted);border-color:var(--border);background:var(--bg3)}
+.p-cyan{color:var(--cyan);border-color:#1f4e6e;background:rgba(121,192,255,.08)}
+
+/* STARTUP CARD */
+.startup-card{background:var(--bg2);border:1px solid var(--purple-b);border-radius:12px;padding:20px 24px;margin-bottom:48px}
+.startup-title{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--purple);margin-bottom:16px}
+.startup-steps{display:flex;flex-direction:column;gap:10px}
+.ss-item{display:flex;gap:12px;align-items:flex-start}
+.ss-num{width:24px;height:24px;border-radius:50%;background:var(--purple-d);border:1px solid var(--purple-b);color:var(--purple);font-size:.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.ss-body{flex:1}
+.ss-fn{font-family:monospace;font-size:.72rem;color:var(--cyan);font-weight:600}
+.ss-desc{font-size:.69rem;color:var(--muted);margin-top:2px;line-height:1.5}
+.ss-file{font-family:monospace;font-size:.62rem;color:var(--dim)}
+
+/* SECTION DIVIDER */
+.section-div{display:flex;align-items:center;gap:12px;margin:40px 0;color:var(--dim);font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em}
+.section-div::before,.section-div::after{content:'';flex:1;height:1px;background:var(--border)}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="nav-title">NetCopilot · Code Journey v2</span>
+  <a href="#startup">⚡ Startup</a>
+  <a href="#files">📁 File Roles</a>
+  <a href="#s1">1 User types</a>
+  <a href="#s2">2 FastAPI</a>
+  <a href="#s3">3 Auth</a>
+  <a href="#s4">4 Safety</a>
+  <a href="#s5">5 Memory</a>
+  <a href="#s6">6 Tools</a>
+  <a href="#s7">7 Prompt</a>
+  <a href="#s8">8 LLM call</a>
+  <a href="#s9">9 LLM picks</a>
+  <a href="#s10">10 Dispatcher</a>
+  <a href="#s10b">10b Playbook</a>
+  <a href="#s11">11 Device</a>
+  <a href="#s12">12 Result back</a>
+  <a href="#s13">13 Answer</a>
+  <a href="#s14">14 Save</a>
+  <a href="#s15">15 Reply</a>
+</nav>
+
+<div class="page">
+
+<!-- HERO -->
+<div class="hero">
+  <h1>NetCopilot — Complete Code Journey</h1>
+  <p>Every function call, every JSON payload, every file — from the moment you press Enter to the moment you see the answer. Question: <em>"Why is BGP down on pe1?"</em></p>
+</div>
+
+
+<!-- ══════════ STARTUP ══════════ -->
+<div id="startup" class="startup-card">
+  <div class="startup-title">⚡ Server Startup — what happens before any request arrives</div>
+  <div class="startup-steps">
+
+    <div class="ss-item">
+      <div class="ss-num">1</div>
+      <div class="ss-body">
+        <span class="ss-fn">lifespan(app)</span> <span class="ss-file">app.py:138</span>
+        <div class="ss-desc">FastAPI calls this once on startup. It runs setup tasks in order, then pauses (yield) while the server is live, then runs cleanup on shutdown.</div>
+      </div>
+    </div>
+
+    <div class="ss-item">
+      <div class="ss-num">2</div>
+      <div class="ss-body">
+        <span class="ss-fn">_init_memory_db()</span> <span class="ss-file">app.py:384</span> &nbsp;→&nbsp; <span class="ss-fn">_init_alerts_db()</span> <span class="ss-file">app.py:444</span>
+        <div class="ss-desc">Creates <strong>memory.db</strong> and <strong>alerts.db</strong> SQLite files if they don't exist yet. memory.db stores conversation history. alerts.db stores incoming alert payloads from Prometheus/Grafana.</div>
+      </div>
+    </div>
+
+    <div class="ss-item">
+      <div class="ss-num">3</div>
+      <div class="ss-body">
+        <span class="ss-fn">reload_registry()</span> <span class="ss-file">adapters/devices/registry.py:102</span> &nbsp;→&nbsp; <span class="ss-fn">_load()</span> &nbsp;→&nbsp; reads <strong>devices.yaml</strong>
+        <div class="ss-desc">Parses devices.yaml. Normalizes vendor aliases (juniper→junos, iosxr→cisco, sros→nokia). Builds <strong>_cache</strong> dict. Output: <code style="color:var(--cyan);font-size:.67rem">{"pe1": {"host":"66.129.x.x","port":33045,"vendor":"junos",...}, "sandbox-iosxr-1": {...,"vendor":"cisco"},...}</code></div>
+      </div>
+    </div>
+
+    <div class="ss-item">
+      <div class="ss-num">4</div>
+      <div class="ss-body">
+        <span class="ss-fn">MCPClient.start()</span> <span class="ss-file">mcp_client/client.py:137</span>
+        <div class="ss-desc">Reads <strong>mcp_servers.yaml</strong>. For each enabled server (only "jira" right now): opens SSE connection → calls list_tools() → builds <strong>tool_to_server</strong> dict and <strong>_tools</strong> list with ~48 Jira tools prefixed as <code style="color:var(--cyan);font-size:.67rem">jira_create_issue, jira_get_issue, ...</code></div>
+      </div>
+    </div>
+
+    <div class="ss-item">
+      <div class="ss-num">5</div>
+      <div class="ss-body">
+        <span class="ss-fn">ToolDispatcher(mcp_client=_mcp_client)</span> <span class="ss-file">adapters/devices/dispatcher.py:72</span>
+        <div class="ss-desc">Creates the dispatcher singleton. Holds a reference to MCPClient. Ready to route all tool calls. Stored as global <code style="color:var(--cyan);font-size:.67rem">_dispatcher</code> in app.py.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="margin-top:14px">
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">app.py:137</span><span class="code-label">lifespan function</span></div>
+      <div class="code-body"><span class="kw">@asynccontextmanager</span>
+<span class="kw">async def</span> <span class="fn">lifespan</span>(<span class="var">app</span>: <span class="cls">FastAPI</span>):
+    <span class="fn">_init_memory_db</span>()                                   <span class="cm"># creates memory.db</span>
+    <span class="fn">_init_alerts_db</span>()                                   <span class="cm"># creates alerts.db</span>
+    <span class="fn">reload_registry</span>()                                   <span class="cm"># loads devices.yaml → _cache</span>
+    _mcp_client = <span class="cls">MCPClient</span>(config_path=<span class="str">"mcp_servers.yaml"</span>)
+    <span class="kw">await</span> _mcp_client.<span class="fn">start</span>()                           <span class="cm"># connects to jira MCP server</span>
+    _dispatcher = <span class="cls">ToolDispatcher</span>(mcp_client=_mcp_client)  <span class="cm"># routing hub</span>
+    <span class="kw">yield</span>                                               <span class="cm"># ← server is live here</span>
+    <span class="kw">await</span> _mcp_client.<span class="fn">stop</span>()                           <span class="cm"># cleanup on shutdown</span></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ FILE ROLES MAP ══════════ -->
+<div id="files" class="roles-section">
+  <div class="roles-title">📁 Every file and what it does</div>
+  <table class="roles-table">
+    <thead><tr><th>File</th><th>Role</th><th>Called from / by</th></tr></thead>
+    <tbody>
+      <tr><td>app.py</td><td>FastAPI server, HTTP endpoints, agentic loop, memory, Slack/Teams handlers</td><td>Entry point — everything flows through here</td></tr>
+      <tr><td>config.py</td><td>Load env vars (API keys, URLs, flags) at startup</td><td>Imported by app.py at top</td></tr>
+      <tr><td>settings.py</td><td>SQLite-backed settings store. get_setting(key) checks DB → env var → default</td><td>Called by every adapter, app.py, llm registry</td></tr>
+      <tr><td>devices.yaml</td><td>Device inventory: name → host, port, vendor, platform, site</td><td>Read by adapters/devices/registry.py at startup</td></tr>
+      <tr><td>mcp_servers.yaml</td><td>MCP server config: name, url, transport, roles, enabled</td><td>Read by mcp_client/client.py at startup</td></tr>
+      <tr><td>memory.db</td><td>SQLite: per-user conversation history (last 12 turns)</td><td>app.py _load_memory / _save_memory</td></tr>
+      <tr><td>alerts.db</td><td>SQLite: alert payloads from Prometheus/Grafana/webhook</td><td>app.py _save_alert / _get_latest_alert</td></tr>
+      <tr><td>adapters/devices/registry.py</td><td>device→vendor lookup, host resolution, vendor correction</td><td>dispatcher.py, all device adapters</td></tr>
+      <tr><td>adapters/devices/dispatcher.py</td><td>Route tool calls: device tools → adapters, jira → MCP, run_playbook → runner</td><td>app.py _agentic_loop via _exec_one()</td></tr>
+      <tr><td>adapters/devices/junos.py</td><td>Juniper NETCONF/SSH: get_bgp_summary, get_interface_health, etc. (18 tools)</td><td>dispatcher.py _call_adapter_tool()</td></tr>
+      <tr><td>adapters/devices/cisco.py</td><td>Cisco IOS-XR SSH: same 18 tools for Cisco devices</td><td>dispatcher.py _call_adapter_tool()</td></tr>
+      <tr><td>adapters/devices/nokia.py</td><td>Nokia SR-OS SSH: same 18 tools for Nokia devices</td><td>dispatcher.py _call_adapter_tool()</td></tr>
+      <tr><td>adapters/devices/pool.py</td><td>SSH connection pool with 60s TTL and circuit breaker</td><td>Called internally by device adapters</td></tr>
+      <tr><td>adapters/llm/registry.py</td><td>Factory: returns OpenAIAdapter, AnthropicAdapter, or LocalAdapter based on settings</td><td>app.py _agentic_loop via get_llm_adapter()</td></tr>
+      <tr><td>adapters/llm/openai_adapter.py</td><td>Wraps openai.chat.completions.create() — the actual LLM API call</td><td>adapters/llm/registry.py</td></tr>
+      <tr><td>adapters/llm/anthropic_adapter.py</td><td>Same but for Anthropic Claude API</td><td>adapters/llm/registry.py</td></tr>
+      <tr><td>adapters/integrations/jira.py</td><td>Direct Jira API: create/close/comment tickets (used by Slack handler)</td><td>dispatcher.py (fallback when MCP unavailable)</td></tr>
+      <tr><td>adapters/integrations/prometheus.py</td><td>Prometheus HTTP query API</td><td>dispatcher.py _call_adapter_tool()</td></tr>
+      <tr><td>adapters/integrations/syslog.py</td><td>Loki/syslog query API</td><td>dispatcher.py _call_adapter_tool()</td></tr>
+      <tr><td>adapters/chat/slack.py</td><td>Slack API: send_message() for alert notifications</td><td>app.py _post_slack_message()</td></tr>
+      <tr><td>mcp_client/client.py</td><td>Connect to MCP servers (SSE), discover tools, route calls, reconnect on failure</td><td>app.py startup → dispatcher.py</td></tr>
+      <tr><td>llm/prompts.py</td><td>Build system prompt string with live device inventory + playbook list</td><td>app.py _run_chat()</td></tr>
+      <tr><td>playbooks/runner.py</td><td>Deterministic investigation: find playbook → run tools → score severity → extract evidence</td><td>dispatcher.py _run_playbook()</td></tr>
+      <tr><td>playbooks/store.py</td><td>Load/save playbooks in SQLite. Falls back to playbooks.yaml</td><td>runner.py _get_playbooks()</td></tr>
+      <tr><td>playbooks/playbooks.yaml</td><td>9 playbook definitions: intent, tools, evidence_fields, severity_rules</td><td>runner.py fallback when DB empty</td></tr>
+      <tr><td>adapters/inventory/netbox.py</td><td>NetBox API: load device inventory</td><td>config.py reload_inventory_devices()</td></tr>
+      <tr><td>adapters/inventory/nautobot.py</td><td>Nautobot API: load device inventory</td><td>config.py reload_inventory_devices()</td></tr>
+      <tr><td>static/index.html</td><td>Browser chat UI — sends POST /chat, displays reply</td><td>Served by FastAPI at GET /</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<div class="section-div">The 15-step journey begins</div>
+
+
+<!-- ══════════ STEP 1 ══════════ -->
+<div class="step" id="s1">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--blue-d);border-color:var(--blue-b);color:var(--blue)">💬</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--blue-b),var(--green-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--blue)">Step 1 — You type a question</div>
+        <div class="step-subtitle">Browser sends HTTP POST to the server with your message as JSON</div>
+      </div>
+    </div>
+
+    <div>
+      <span class="file-badge" style="background:var(--blue-d);border-color:var(--blue-b);color:var(--blue)">📄 static/index.html</span>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">⌨️ You type</div>
+        <div class="pp-body">"Why is BGP down on pe1?"</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">📡 Browser sends — HTTP POST /chat</div>
+        <div class="pp-body">POST http://localhost:8001/chat
+Content-Type: application/json
+X-API-Key: abc123:noc-ticket
+
+{
+  "message": "Why is BGP down on pe1?",
+  "user": "syed"
+}</div>
+      </div>
+    </div>
+
+    <div class="explain">
+      <strong>What is JSON?</strong> JavaScript Object Notation — a text format computers use to pass structured data. The browser packages your message and username into this JSON object and sends it as an HTTP POST (like mailing a letter). The <span class="em">X-API-Key</span> header is your credential — the server checks this to know who you are.
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 2 ══════════ -->
+<div class="step" id="s2">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--green-d);border-color:var(--green-b);color:var(--green)">⚙️</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--green-b),var(--red-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--green)">Step 2 — FastAPI receives the request</div>
+        <div class="step-subtitle">The /chat endpoint function runs, validates the request, and calls _run_chat()</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--green-d);border-color:var(--green-b);color:var(--green)">📄 app.py:895</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">chat(req, request)</span><span class="cc-file">:895</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_enforce_rate_limit(ip)</span><span class="cc-file">:293</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_get_role_from_request()</span><span class="cc-file">:321</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_run_chat(message, user, role)</span><span class="cc-file">:783</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">app.py:895</span><span class="code-label">the /chat endpoint</span></div>
+      <div class="code-body"><span class="cm"># FastAPI validates the JSON body into ChatRequest automatically.</span>
+<span class="cm"># If "message" is missing, FastAPI returns 422 before this code runs.</span>
+
+<span class="kw">class</span> <span class="cls">ChatRequest</span>(<span class="cls">BaseModel</span>):
+    <span class="var">message</span>: str          <span class="cm"># required</span>
+    <span class="var">user</span>: str = <span class="str">"unknown"</span> <span class="cm"># optional, defaults to "unknown"</span>
+
+<span class="hi">@app.post(<span class="str">"/chat"</span>)</span>
+<span class="kw">async def</span> <span class="fn">chat</span>(<span class="var">req</span>: <span class="cls">ChatRequest</span>, <span class="var">request</span>: <span class="cls">Request</span>):
+    <span class="fn">_enforce_rate_limit</span>(<span class="var">request</span>.client.host)  <span class="cm"># 429 if > 60 req/min per IP</span>
+    <span class="var">role</span> = <span class="fn">_get_role_from_request</span>(<span class="var">request</span>)     <span class="cm"># "admin"/"noc-ticket"/"noc"</span>
+    <span class="kw">return await</span> <span class="fn">_run_chat</span>(<span class="var">req</span>.message, <span class="var">req</span>.user, <span class="var">role</span>)</div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ INPUT to chat()</div>
+        <div class="pp-body">req.message = "Why is BGP down on pe1?"
+req.user    = "syed"
+request.headers["X-API-Key"] = "abc123:noc-ticket"
+request.client.host = "127.0.0.1"</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← OUTPUT — calls _run_chat with</div>
+        <div class="pp-body">message = "Why is BGP down on pe1?"
+user    = "syed"
+role    = "noc-ticket"</div>
+      </div>
+    </div>
+
+    <div class="explain">
+      <strong>Why does FastAPI have a class (ChatRequest)?</strong> The <span class="em">BaseModel</span> class automatically validates incoming JSON. If a field is wrong type or missing, it returns an error before your function runs. This is called "schema validation" — you define the shape of valid input, and FastAPI enforces it.
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 3 ══════════ -->
+<div class="step" id="s3">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--red-d);border-color:var(--red-b);color:var(--red)">🔐</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--red-b),var(--orange-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--red)">Step 3 — Auth check: who are you?</div>
+        <div class="step-subtitle">_get_role_from_request() checks API key header or Auth0 session. Role controls which tools the LLM can see.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--red-d);border-color:var(--red-b);color:var(--red)">📄 app.py:307 _parse_api_keys()</span>
+    <span class="file-badge" style="background:var(--red-d);border-color:var(--red-b);color:var(--red)">📄 app.py:321 _get_role_from_request()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">⚙️ config.py NETCOPILOT_API_KEYS env var</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">_get_role_from_request(request)</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_parse_api_keys()</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">keys.get(api_key)</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">returns role string</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">app.py:307,321</span><span class="code-label">parsing API keys and resolving role</span></div>
+      <div class="code-body"><span class="cm"># NETCOPILOT_API_KEYS env var looks like: "abc123:noc-ticket,xyz789:admin"</span>
+<span class="kw">def</span> <span class="fn">_parse_api_keys</span>() -> dict[str, str]:
+    <span class="kw">for</span> <span class="var">item</span> <span class="kw">in</span> <span class="cls">NETCOPILOT_API_KEYS</span>.split(<span class="str">","</span>):
+        <span class="var">key</span>, <span class="var">role</span> = <span class="var">item</span>.split(<span class="str">":"</span>, <span class="num">1</span>)
+        <span class="var">keys</span>[<span class="var">key</span>.strip()] = <span class="var">role</span>.strip()
+    <span class="kw">return</span> <span class="var">keys</span>   <span class="cm"># → {"abc123": "noc-ticket", "xyz789": "admin"}</span>
+
+<span class="kw">def</span> <span class="fn">_get_role_from_request</span>(<span class="var">request</span>: <span class="cls">Request</span>) -> str:
+    <span class="var">keys</span> = <span class="fn">_parse_api_keys</span>()
+    <span class="kw">if not</span> <span class="var">keys</span> <span class="kw">and not</span> AUTH0_DOMAIN:
+        <span class="kw">return</span> <span class="str">"admin"</span>          <span class="cm"># dev mode — no auth configured</span>
+
+    <span class="var">api_key</span> = <span class="var">request</span>.headers.get(<span class="str">"X-API-Key"</span>, <span class="str">""</span>)
+    <span class="hi"><span class="var">role</span> = <span class="var">keys</span>.get(<span class="var">api_key</span>)  <span class="cm"># "abc123" → "noc-ticket"</span></span>
+    <span class="kw">if</span> <span class="var">role</span>: <span class="kw">return</span> <span class="var">role</span>
+
+    <span class="var">user</span> = <span class="var">request</span>.session.get(<span class="str">"user"</span>)  <span class="cm"># Auth0 browser login</span>
+    <span class="kw">if</span> <span class="var">user</span>: <span class="kw">return</span> <span class="var">user</span>.get(<span class="str">"role"</span>, AUTH0_DEFAULT_ROLE)
+
+    <span class="kw">raise</span> <span class="cls">HTTPException</span>(status_code=<span class="num">403</span>, detail=<span class="str">"Invalid API key."</span>)</div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ INPUT</div>
+        <div class="pp-body">X-API-Key header: "abc123:noc-ticket"
+NETCOPILOT_API_KEYS: "abc123:noc-ticket,xyz789:admin"</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← OUTPUT</div>
+        <div class="pp-body">role = "noc-ticket"
+
+# Role controls tool visibility:
+# admin      → all tools (~75)
+# noc-ticket → device + jira + prometheus + syslog tools
+# noc        → device tools only</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 4 ══════════ -->
+<div class="step" id="s4">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--orange-d);border-color:var(--orange-b);color:var(--orange)">🛡️</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--orange-b),var(--purple-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--orange)">Step 4 — Safety check: is this a config change?</div>
+        <div class="step-subtitle">_is_config_request() runs a regex against the message BEFORE the LLM is ever called. If it matches, return immediately.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--orange-d);border-color:var(--orange-b);color:var(--orange)">📄 app.py:588 _is_config_request()</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">_run_chat(message, user, role)</span><span class="cc-file">:783</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_is_config_request(message)</span><span class="cc-file">:588</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">re.compile(pattern).search(msg)</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">returns bool</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">app.py:588</span><span class="code-label">regex safety gate</span></div>
+      <div class="code-body"><span class="kw">def</span> <span class="fn">_is_config_request</span>(<span class="var">message</span>: str) -> bool:
+    <span class="var">normalized</span> = <span class="var">message</span>.lower()
+    <span class="cm"># Allow read-only "show" commands even if they contain flagged words</span>
+    <span class="kw">if</span> <span class="var">normalized</span>.strip().startswith((<span class="str">"show "</span>, <span class="str">"display "</span>)):
+        <span class="kw">return</span> <span class="cls">False</span>
+
+    <span class="var">pattern</span> = re.compile(
+        <span class="str">r"\b(configure|configuration|apply|commit|rollback|shutdown|"</span>
+        <span class="str">r"no shutdown|enable|disable|set\s+|delete\s+|replace\s+|"</span>
+        <span class="str">r"edit\s+|change\s+|modify\s+|update\s+)\b"</span>
+    )
+    <span class="kw">return</span> bool(<span class="var">pattern</span>.search(<span class="var">normalized</span>))
+
+<span class="cm"># In _run_chat():</span>
+<span class="hi"><span class="kw">if</span> <span class="fn">_is_config_request</span>(<span class="var">message</span>):</span>
+    <span class="kw">return</span> {<span class="str">"request_id"</span>: ..., <span class="str">"reply"</span>: <span class="str">"NetCopilot is read-only..."</span>}
+<span class="cm"># ↑ Returns HERE. LLM is NEVER called. Device is NEVER touched.</span></div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ INPUT</div>
+        <div class="pp-body">"Why is BGP down on pe1?"</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← OUTPUT</div>
+        <div class="pp-body">_is_config_request() = False
+→ passes, continues to step 5
+
+# If you had typed "shutdown ge-0/0/1":
+_is_config_request() = True
+→ returns immediately:
+  {"reply": "NetCopilot is read-only..."}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 5 ══════════ -->
+<div class="step" id="s5">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">🧠</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--purple-b),var(--yellow-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--purple)">Step 5 — Load conversation memory</div>
+        <div class="step-subtitle">SQLite memory.db stores last 12 turns per user. These go into the LLM's context so it remembers prior messages.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">📄 app.py:404 _load_memory()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">🗄️ memory.db (SQLite)</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">_run_chat()</span><span class="cc-file">:810</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_load_memory(user)</span><span class="cc-file">:404</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">sqlite3.connect("memory.db")</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">SELECT role, content ... LIMIT 24</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">returns list[dict]</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">app.py:404</span><span class="code-label">loading last 12 turns from SQLite</span></div>
+      <div class="code-body"><span class="cm"># memory.db table schema:</span>
+<span class="cm"># CREATE TABLE memory (</span>
+<span class="cm">#   id INTEGER PRIMARY KEY AUTOINCREMENT,</span>
+<span class="cm">#   user TEXT NOT NULL,      ← "syed"</span>
+<span class="cm">#   role TEXT NOT NULL,      ← "user" or "assistant"</span>
+<span class="cm">#   content TEXT NOT NULL,   ← the message text</span>
+<span class="cm">#   created_at REAL NOT NULL ← unix timestamp</span>
+<span class="cm"># )</span>
+
+<span class="kw">def</span> <span class="fn">_load_memory</span>(<span class="var">user</span>: str) -> list[dict]:
+    <span class="kw">with</span> sqlite3.connect(<span class="str">"memory.db"</span>) <span class="kw">as</span> <span class="var">conn</span>:
+        <span class="var">rows</span> = <span class="var">conn</span>.execute(
+            <span class="str">"SELECT role, content FROM memory"</span>
+            <span class="str">" WHERE user = ? ORDER BY id DESC LIMIT ?"</span>,
+            (<span class="var">user</span>, <span class="hi"><span class="num">24</span></span>)  <span class="cm"># 24 rows = 12 turns (user+assistant pairs)</span>
+        ).fetchall()
+    <span class="var">rows</span>.reverse()   <span class="cm"># oldest first so LLM reads them in order</span>
+    <span class="kw">return</span> [{<span class="str">"role"</span>: r, <span class="str">"content"</span>: c} <span class="kw">for</span> r, c <span class="kw">in</span> <span class="var">rows</span>]</div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ SQL query</div>
+        <div class="pp-body">SELECT role, content FROM memory
+WHERE user = 'syed'
+ORDER BY id DESC LIMIT 24</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← OUTPUT — history list</div>
+        <div class="pp-body">[
+  {"role": "user",
+   "content": "check CPU on pe1"},
+  {"role": "assistant",
+   "content": "CPU is 23% — healthy."},
+  {"role": "user",
+   "content": "any alarms on pe1?"},
+  {"role": "assistant",
+   "content": "No active chassis alarms."}
+  // ← current question added later
+]</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 6 ══════════ -->
+<div class="step" id="s6">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--yellow-d);border-color:var(--yellow-b);color:var(--yellow)">🚦</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--yellow-b),var(--purple-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--yellow)">Step 6 — Build the tool list for the LLM</div>
+        <div class="step-subtitle">get_all_tools(role) assembles tools from 4 sources and filters by role. The LLM reads these to know what it can call.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--yellow-d);border-color:var(--yellow-b);color:var(--yellow)">📄 adapters/devices/dispatcher.py:79 get_all_tools()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 adapters/devices/junos.py TOOL_SCHEMAS</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 mcp_client/client.py get_tools()</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">_run_chat()</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_dispatcher.get_all_tools(role)</span><span class="cc-file">:79</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_load_module("adapters.devices.junos")</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">mod.TOOL_SCHEMAS</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_mcp.get_tools(role)</span><span class="cc-file">mcp_client:193</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">returns list[dict]</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">adapters/devices/dispatcher.py:79</span><span class="code-label">assembling tools from 4 sources</span></div>
+      <div class="code-body"><span class="kw">def</span> <span class="fn">get_all_tools</span>(<span class="var">self</span>, <span class="var">role</span>: str) -> list[dict]:
+    <span class="var">tools</span> = []
+
+    <span class="cm"># SOURCE 1: Device adapter tools (all roles see these)</span>
+    <span class="kw">for</span> <span class="var">vendor</span>, <span class="var">mod_name</span> <span class="kw">in</span> {<span class="str">"cisco"</span>:..., <span class="str">"junos"</span>:..., <span class="str">"nokia"</span>:...}.items():
+        <span class="var">mod</span> = <span class="fn">_load_module</span>(<span class="var">mod_name</span>)
+        <span class="var">tools</span>.extend(<span class="var">mod</span>.TOOL_SCHEMAS)  <span class="cm"># 18 tools × 3 vendors = 54 tools</span>
+
+    <span class="cm"># SOURCE 2: Integration adapter tools (role-filtered)</span>
+    <span class="cm"># Skip if vendor MCP already covers this prefix (avoid duplicates)</span>
+    <span class="var">mcp_prefixes</span> = {<span class="var">t</span>.split(<span class="str">"_"</span>,<span class="num">1</span>)[<span class="num">0</span>] <span class="kw">for</span> <span class="var">t</span> <span class="kw">in</span> <span class="var">self</span>._mcp.tool_to_server}
+    <span class="kw">for</span> <span class="var">prefix</span>, <span class="var">mod_name</span> <span class="kw">in</span> {<span class="str">"jira"</span>:..., <span class="str">"prometheus"</span>:..., <span class="str">"syslog"</span>:...}.items():
+        <span class="kw">if</span> <span class="var">role</span> <span class="kw">not in</span> <span class="var">_INTEGRATION_ROLES</span>[<span class="var">prefix</span>]: <span class="kw">continue</span>  <span class="cm"># role check</span>
+        <span class="kw">if</span> <span class="var">prefix</span> <span class="kw">in</span> <span class="var">mcp_prefixes</span>: <span class="kw">continue</span>            <span class="cm"># MCP covers it</span>
+        <span class="var">tools</span>.extend(<span class="var">mod</span>.TOOL_SCHEMAS)
+
+    <span class="cm"># SOURCE 3: Vendor MCP server tools (mcp-atlassian: 48 Jira tools)</span>
+    <span class="var">tools</span>.extend(<span class="var">self</span>._mcp.<span class="fn">get_tools</span>(<span class="var">role</span>))  <span class="cm"># filtered by server_roles</span>
+
+    <span class="cm"># SOURCE 4: run_playbook meta-tool (all roles)</span>
+    <span class="var">tools</span>.append(_PLAYBOOK_SCHEMA)
+
+    <span class="kw">return</span> <span class="var">tools</span>  <span class="cm"># ~73 tools for admin, ~60 for noc-ticket, ~56 for noc</span></div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ INPUT</div>
+        <div class="pp-body">role = "noc-ticket"</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← OUTPUT — one tool def looks like</div>
+        <div class="pp-body">{
+  "type": "function",
+  "function": {
+    "name": "junos_get_bgp_summary",
+    "description": "Get BGP summary for all
+      neighbours on a Juniper device.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "device": {"type": "string",
+          "description": "Device name"}
+      },
+      "required": ["device"]
+    }
+  }
+}
+// × ~60 more tool definitions</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 7 ══════════ -->
+<div class="step" id="s7">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">📜</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--purple-b),var(--purple-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--purple)">Step 7 — Build the system prompt</div>
+        <div class="step-subtitle">build_system_prompt() injects live device inventory + playbook list into the LLM's instruction manual, built fresh every request.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">📄 llm/prompts.py build_system_prompt()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 adapters/devices/registry.py device_inventory_summary()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 playbooks/store.py format_playbook_summary()</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">_run_chat()</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">format_playbook_summary()</span><span class="cc-file">store.py</span>
+      <span class="cc-arr">+</span>
+      <span class="cc-fn">device_inventory_summary()</span><span class="cc-file">registry.py:187</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">build_system_prompt(pb_summary, device_inv)</span><span class="cc-file">prompts.py</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">returns string</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">adapters/devices/registry.py:187</span><span class="code-label">device inventory injected into the prompt</span></div>
+      <div class="code-body"><span class="kw">def</span> <span class="fn">device_inventory_summary</span>() -> str:
+    <span class="cm"># Reads the _cache built during startup from devices.yaml</span>
+    <span class="kw">for</span> <span class="var">name</span>, <span class="var">info</span> <span class="kw">in</span> sorted(<span class="fn">_registry</span>().items()):
+        <span class="var">site</span> = <span class="str">f" [{info['site']}]"</span> <span class="kw">if</span> <span class="var">info</span>.get(<span class="str">"site"</span>) <span class="kw">else</span> <span class="str">""</span>
+        <span class="var">lines</span>.append(<span class="str">f"  {name}: vendor={info['vendor']} platform={info['platform']}{site}"</span>)
+    <span class="cm"># Returns:</span>
+    <span class="cm"># "  p5: vendor=junos platform=junos [lon]"</span>
+    <span class="cm"># "  pe1: vendor=junos platform=junos"</span>
+    <span class="cm"># "  pe2: vendor=junos platform=junos"</span>
+    <span class="cm"># "  sandbox-iosxr-1: vendor=cisco platform=iosxr"</span></div>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">llm/prompts.py — the COMPLETE system prompt the LLM reads before your question</span><span class="code-label">real code</span></div>
+      <div class="code-body"><span class="kw">def</span> <span class="fn">build_system_prompt</span>(<span class="var">playbook_summary</span>: str, <span class="var">device_inventory</span>: str = <span class="str">""</span>) -> str:
+    <span class="kw">return</span> <span class="str">f"""
+You are NetCopilot, an AI assistant for network operations engineers.
+Devices may be Cisco IOS XR, Juniper Junos, or Nokia SR OS.
+
+OPERATIONAL SCOPE
+You perform read/diagnostic operations and ticket creation only.
+You do NOT push, commit, or apply any changes to devices.
+
+IMPORTANT DISTINCTION:
+- ALLOWED:     Reading device state ("show configuration", "get config").
+               These are diagnostic reads — always perform them when asked.
+- NOT ALLOWED: Proposing or applying changes. If asked to change something,
+               decline and offer to create a change ticket.
+
+DEVICE INVENTORY (use this to pick the right vendor tool prefix):
+{device_inventory}
+  ↑ injected live from devices.yaml via registry.device_inventory_summary()
+
+Vendor tool mapping:
+- Juniper Junos → tools prefixed with junos_
+- Cisco IOS XR  → tools prefixed with cisco_
+- Nokia SR OS   → tools prefixed with nokia_
+Do NOT ask the user which vendor — look it up above.
+
+Playbooks:
+{playbook_summary}
+  ↑ injected live: "bgp_down, link_down, cpu_high, ..."
+When the user's question matches a playbook intent, run run_playbook.
+
+Answer format:
+- Clear diagnosis with evidence cited from tool output
+- Root-cause hypothesis (never guess without evidence)
+- Read-only next steps — what to check, not what to configure
+- Severity: Critical / Major / Minor / Info
+- Checklist: Status → Evidence → Likely cause → Next steps
+
+Do NOT invent device names, IPs, or neighbours.
+Only use values returned by tools.
+"""</span>
+<span class="cm"># Why f-string? The {} inject the live device list and playbook names</span>
+<span class="cm"># into the prompt text every single request. The LLM reads this as</span>
+<span class="cm"># its "instruction manual" before it sees your question.</span></div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ INPUT</div>
+        <div class="pp-body">device_inventory =
+  "  pe1: vendor=junos platform=junos
+   pe2: vendor=junos platform=junos
+   sandbox-iosxr-1: vendor=cisco platform=iosxr
+   ..."
+
+playbook_summary =
+  "bgp_down: BGP neighbor down
+   link_down: Interface down/down
+   cpu_high: High CPU / memory ..."</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← OUTPUT — system prompt (excerpt)</div>
+        <div class="pp-body">"You are NetCopilot, an AI assistant for
+network operations engineers.
+
+SCOPE: Read-only diagnostics and ticket
+creation only. Do NOT apply changes.
+
+DEVICE INVENTORY:
+  pe1: vendor=junos platform=junos
+  sandbox-iosxr-1: vendor=cisco platform=iosxr
+
+Vendor tool rule:
+  Juniper → use junos_* tools
+  Cisco   → use cisco_* tools
+  Nokia   → use nokia_* tools
+
+Available playbooks:
+  bgp_down, link_down, cpu_high ..."</div>
+      </div>
+    </div>
+
+    <div class="explain">
+      <strong>Why inject device inventory into every request?</strong> The LLM has no memory of your network. By putting <span class="em">"pe1: vendor=junos"</span> into the instructions, the LLM knows to call <span class="em">junos_get_bgp_summary</span> for pe1 — not cisco_. Built fresh every request so newly added devices are picked up without restarting.
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 8 ══════════ -->
+<div class="step" id="s8">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">🤖</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--purple-b),var(--purple-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--purple)">Step 8 — Call the LLM (first time)</div>
+        <div class="step-subtitle">_agentic_loop() assembles the full message array and calls the LLM API. The LLM receives everything at once.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">📄 app.py:671 _agentic_loop()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 adapters/llm/registry.py get_llm_adapter()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 adapters/llm/openai_adapter.py OpenAIAdapter.chat()</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">_run_chat()</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_agentic_loop(request_id, messages, tools, model, user, role)</span><span class="cc-file">:671</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">get_llm_adapter()</span><span class="cc-file">registry.py</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">OpenAIAdapter(api_key)</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">llm_adapter.chat(model, messages, tools, "auto")</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn cc-ext">api.openai.com</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">app.py:747 + adapters/llm/openai_adapter.py:21</span><span class="code-label">building messages and calling the LLM</span></div>
+      <div class="code-body"><span class="cm"># _run_chat() builds the messages array before calling _agentic_loop()</span>
+<span class="var">messages</span> = [
+    {<span class="str">"role"</span>: <span class="str">"system"</span>, <span class="str">"content"</span>: <span class="var">system_prompt</span>},  <span class="cm"># ← Step 7 output</span>
+    <span class="cm"># ↓ Step 5 output (previous conversation turns)</span>
+    {<span class="str">"role"</span>: <span class="str">"user"</span>,      <span class="str">"content"</span>: <span class="str">"check CPU on pe1"</span>},
+    {<span class="str">"role"</span>: <span class="str">"assistant"</span>, <span class="str">"content"</span>: <span class="str">"CPU is 23% — healthy."</span>},
+    <span class="cm"># ↓ current question</span>
+    {<span class="str">"role"</span>: <span class="str">"user"</span>, <span class="str">"content"</span>: <span class="str">"Why is BGP down on pe1?"</span>},
+]
+
+<span class="cm"># OpenAIAdapter.chat() wraps openai SDK:</span>
+<span class="hi"><span class="var">response</span> = <span class="var">self</span>.client.chat.completions.create(</span>
+    <span class="var">model</span>     = <span class="str">"gpt-4.1-mini"</span>,   <span class="cm"># from settings.db OPENAI_MODEL</span>
+    <span class="var">messages</span>  = <span class="var">messages</span>,
+    <span class="var">tools</span>     = <span class="var">tools</span>,             <span class="cm"># the ~60 tool defs from Step 6</span>
+    <span class="var">tool_choice</span> = <span class="str">"auto"</span>           <span class="cm"># LLM decides: call tool OR answer</span>
+<span class="hi">)</span></div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ FULL PAYLOAD SENT TO OPENAI API</div>
+        <div class="pp-body">{
+  "model": "gpt-4.1-mini",
+  "tool_choice": "auto",
+  "messages": [
+    {"role": "system",
+     "content": "You are NetCopilot... pe1=junos..."},
+    {"role": "user",
+     "content": "check CPU on pe1"},
+    {"role": "assistant",
+     "content": "CPU is 23% — healthy."},
+    {"role": "user",
+     "content": "Why is BGP down on pe1?"}
+  ],
+  "tools": [
+    {"type":"function","function":{
+      "name":"junos_get_bgp_summary",...}},
+    {"type":"function","function":{
+      "name":"cisco_get_bgp_summary",...}},
+    // ... ~60 more tool definitions
+  ]
+}</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← LLM API RESPONSE (next step)</div>
+        <div class="pp-body">{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "id": "call_Abc123",
+        "type": "function",
+        "function": {
+          "name": "junos_get_bgp_summary",
+          "arguments": "{\"device\":\"pe1\"}"
+        }
+      }]
+    }
+  }]
+}</div>
+      </div>
+    </div>
+
+    <div class="explain">
+      <strong>How does get_llm_adapter() know which LLM to use?</strong> It calls <span class="em">get_setting("LLM_PROVIDER", "openai")</span> which checks settings.db first, then the env var, then defaults to "openai". This means you can switch from OpenAI to Anthropic Claude without restarting — just change the setting in the admin UI.
+    </div>
+  </div>
+</div>
+
+
+
+<!-- ══════════ STEP 9 ══════════ -->
+<div class="step" id="s9">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">💭</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--purple-b),var(--yellow-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--purple)">Step 9 — LLM decides what to do</div>
+        <div class="step-subtitle">The LLM reads system prompt + history + tools. It returns either tool_calls (needs data) or plain text (ready to answer).</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">📄 app.py:760 _agentic_loop() — reading the response</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">response = llm_adapter.chat(...)</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">msg = response.choices[0].message</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">if msg.tool_calls → yield tool_start events</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">asyncio.gather(*[_exec_one(tc) for tc in msg.tool_calls])</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">app.py:760</span><span class="code-label">reading the LLM's response — two possible paths</span></div>
+      <div class="code-body"><span class="var">msg</span> = <span class="var">response</span>.choices[<span class="num">0</span>].message
+
+<span class="kw">if not</span> <span class="var">msg</span>.tool_calls:
+    <span class="cm"># PATH A: LLM answered directly — no tools needed</span>
+    <span class="kw">yield</span> {<span class="str">"type"</span>: <span class="str">"reply"</span>, <span class="str">"content"</span>: <span class="var">msg</span>.content}
+    <span class="kw">return</span>  <span class="cm"># loop ends here (skip to step 14)</span>
+
+<span class="cm"># PATH B: LLM wants tools — announce them, then run in parallel</span>
+<span class="var">messages</span>.append(<span class="var">msg</span>)  <span class="cm"># add assistant message to conversation</span>
+<span class="kw">for</span> <span class="var">tc</span> <span class="kw">in</span> <span class="var">msg</span>.tool_calls:
+    <span class="var">args</span> = json.loads(<span class="var">tc</span>.function.arguments)
+    <span class="kw">yield</span> {<span class="str">"type"</span>: <span class="str">"tool_start"</span>, <span class="str">"name"</span>: <span class="var">tc</span>.function.name, <span class="str">"args"</span>: <span class="var">args</span>}
+    <span class="cm"># ↑ sent to browser via SSE — shows "🔧 calling junos_get_bgp_summary..."</span>
+
+<span class="cm"># Run ALL tool calls in parallel (asyncio.gather)</span>
+<span class="hi"><span class="var">pairs</span> = <span class="kw">await</span> asyncio.gather(*[<span class="fn">_exec_one</span>(<span class="var">tc</span>) <span class="kw">for</span> <span class="var">tc</span> <span class="kw">in</span> <span class="var">msg</span>.tool_calls])</span></div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ LLM response JSON (from API)</div>
+        <div class="pp-body">{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "id": "call_Abc123",
+        "type": "function",
+        "function": {
+          "name": "junos_get_bgp_summary",
+          "arguments": "{\"device\":\"pe1\"}"
+        }
+      }]
+    },
+    "finish_reason": "tool_calls"
+  }]
+}</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← Passed to _exec_one(tc)</div>
+        <div class="pp-body">tc.function.name = "junos_get_bgp_summary"
+tc.function.arguments = '{"device":"pe1"}'
+tc.id = "call_Abc123"
+
+# _exec_one() parses arguments:
+args = json.loads(tc.function.arguments)
+# → {"device": "pe1"}
+
+# Then calls:
+await _dispatcher.call_tool(
+  "junos_get_bgp_summary",
+  {"device": "pe1"}
+)</div>
+      </div>
+    </div>
+
+    <div class="explain">
+      <strong>How does the LLM know to pick junos_get_bgp_summary and not cisco_?</strong> It read the system prompt: <em>"pe1: vendor=junos"</em>. It matched this to the tool description: <em>"junos_get_bgp_summary — Get BGP summary for Juniper devices."</em> No hardcoding — pure reasoning. <strong>asyncio.gather()</strong> means if the LLM calls 3 tools at once, they all run in parallel (not one after another).
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 10 ══════════ -->
+<div class="step" id="s10">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--yellow-d);border-color:var(--yellow-b);color:var(--yellow)">🚦</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--yellow-b),var(--orange-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--yellow)">Step 10 — Dispatcher routes the tool call</div>
+        <div class="step-subtitle">dispatcher.call_tool() reads the prefix, auto-corrects wrong vendor, finds the right Python function, and calls it.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--yellow-d);border-color:var(--yellow-b);color:var(--yellow)">📄 adapters/devices/dispatcher.py:135 call_tool()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 adapters/devices/registry.py:160 correct_tool_vendor()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 adapters/devices/dispatcher.py:184 _call_adapter_tool()</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">_exec_one(tc)</span><span class="cc-file">app.py:700</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_dispatcher.call_tool("junos_get_bgp_summary", {"device":"pe1"})</span><span class="cc-file">:135</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">correct_tool_vendor(name, "pe1")</span><span class="cc-file">registry.py:160</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_call_adapter_tool(name, args, _VENDOR_MODULES)</span><span class="cc-file">:184</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_load_module("adapters.devices.junos")</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">TOOLS["get_bgp_summary"]</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">await func(device="pe1")</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">adapters/devices/dispatcher.py:135</span><span class="code-label">complete routing logic</span></div>
+      <div class="code-body"><span class="kw">async def</span> <span class="fn">call_tool</span>(<span class="var">self</span>, <span class="var">tool_name</span>: str, <span class="var">arguments</span>: dict):
+    <span class="cm"># Special case: run_playbook → see Step 10b below</span>
+    <span class="kw">if</span> <span class="var">tool_name</span> == <span class="str">"run_playbook"</span>:
+        <span class="kw">return await</span> <span class="var">self</span>.<span class="fn">_run_playbook</span>(<span class="var">arguments</span>)
+
+    <span class="cm"># Auto-correct vendor prefix if LLM got it wrong</span>
+    <span class="var">device</span> = <span class="var">arguments</span>.get(<span class="str">"device"</span>, <span class="str">""</span>)
+    <span class="kw">if</span> <span class="var">device</span> <span class="kw">and</span> <span class="fn">_is_device_tool</span>(<span class="var">tool_name</span>):
+        <span class="hi"><span class="var">tool_name</span> = <span class="fn">correct_tool_vendor</span>(<span class="var">tool_name</span>, <span class="var">device</span>)</span>
+        <span class="cm"># e.g. "nokia_get_bgp_summary" on pe1 → "junos_get_bgp_summary"</span>
+
+    <span class="kw">if</span> <span class="fn">_is_device_tool</span>(<span class="var">tool_name</span>):   <span class="cm"># cisco_*, junos_*, nokia_*</span>
+        <span class="kw">return await</span> <span class="var">self</span>.<span class="fn">_call_adapter_tool</span>(<span class="var">tool_name</span>, <span class="var">arguments</span>, _VENDOR_MODULES)
+
+    <span class="kw">if</span> <span class="fn">_is_integration_tool</span>(<span class="var">tool_name</span>):  <span class="cm"># jira_*, prometheus_*, syslog_*</span>
+        <span class="kw">if</span> <span class="var">self</span>._mcp <span class="kw">and</span> <span class="var">tool_name</span> <span class="kw">in</span> <span class="var">self</span>._mcp.tool_to_server:
+            <span class="kw">return await</span> <span class="var">self</span>.<span class="fn">_call_mcp_tool</span>(<span class="var">tool_name</span>, <span class="var">arguments</span>)
+        <span class="kw">return await</span> <span class="var">self</span>.<span class="fn">_call_adapter_tool</span>(<span class="var">tool_name</span>, <span class="var">arguments</span>, _INTEGRATION_MODULES)
+
+<span class="cm"># Inside _call_adapter_tool():</span>
+<span class="var">prefix</span>, _, <span class="var">base_name</span> = <span class="var">tool_name</span>.partition(<span class="str">"_"</span>)
+<span class="cm"># "junos_get_bgp_summary" → prefix="junos", base_name="get_bgp_summary"</span>
+<span class="var">mod</span> = <span class="fn">_load_module</span>(<span class="str">"adapters.devices.junos"</span>)
+<span class="var">func</span> = <span class="var">mod</span>.TOOLS.get(<span class="str">"get_bgp_summary"</span>)  <span class="cm"># the actual Python function</span>
+<span class="kw">return await</span> <span class="fn">func</span>(**<span class="var">arguments</span>)            <span class="cm"># await func(device="pe1")</span></div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ INPUT to call_tool()</div>
+        <div class="pp-body">tool_name = "junos_get_bgp_summary"
+arguments = {"device": "pe1"}
+
+# correct_tool_vendor() checks:
+registry._cache["pe1"]["vendor"] = "junos"
+# prefix "junos" matches → no correction needed</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← Resolves to Python function</div>
+        <div class="pp-body">module = adapters.devices.junos
+TOOLS = {
+  "get_bgp_summary": get_bgp_summary,
+  "get_interface_health": get_interface_health,
+  // 16 more functions...
+}
+
+func = TOOLS["get_bgp_summary"]
+await func(device="pe1")
+→ goes to Step 11</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 10b ══════════ -->
+<div class="step" id="s10b">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">📋</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--purple-b),var(--orange-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--purple)">Step 10b — Playbook Runner (when LLM calls run_playbook)</div>
+        <div class="step-subtitle">Instead of calling a device tool directly, the LLM sometimes calls run_playbook. This triggers a deterministic investigation sequence — same steps every time, no LLM guessing.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">📄 adapters/devices/dispatcher.py:224 _run_playbook()</span>
+    <span class="file-badge" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">📄 playbooks/runner.py PlaybookRunner.run()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 playbooks/store.py list_playbooks()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 playbooks/playbooks.yaml 9 playbooks</span>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">playbooks/playbooks.yaml — the bgp_down playbook (real file content)</span><span class="code-label">defines what tools to run + how to score severity</span></div>
+      <div class="code-body"><span class="cm"># This YAML file is the "recipe" the PlaybookRunner follows.</span>
+<span class="cm"># runner.py reads it, then executes each tool in the "tools" list.</span>
+<span class="cm"># It scores severity using severity_rules, extracts evidence_fields.</span>
+
+- name: BGP neighbor down
+  intent: bgp_down          <span class="cm"># LLM passes intent="bgp_down" to run_playbook</span>
+  tools:                    <span class="cm"># tools run IN ORDER, one after another</span>
+    - get_bgp_summary       <span class="cm"># → gets all BGP peer states</span>
+    - get_bgp_neighbor_status  <span class="cm"># → detail on specific neighbour</span>
+    - get_ping              <span class="cm"># → can we even reach the neighbour?</span>
+  evidence_fields:          <span class="cm"># extract these fields from all tool outputs</span>
+    - state                 <span class="cm"># e.g. "Active", "Idle", "Established"</span>
+    - last_error            <span class="cm"># e.g. "Hold timer expired"</span>
+    - last_event            <span class="cm"># e.g. "RecvNotify"</span>
+    - flaps                 <span class="cm"># number of session flaps</span>
+  severity_rules:           <span class="cm"># ANY match triggers that severity level</span>
+    critical:
+      - state=Idle          <span class="cm"># if ANY peer has state=Idle → Critical</span>
+      - state=Active        <span class="cm"># if ANY peer has state=Active → Critical</span>
+
+<span class="cm"># All 9 playbooks follow the same schema:</span>
+- name: Interface down/down
+  intent: link_down
+  tools: [get_interface_health, get_link_health]
+  evidence_fields: [admin_status, oper_status, last_flapped, active_alarms]
+  severity_rules:
+    critical:
+      - oper_status=down
+
+- name: ISIS adjacency down
+  intent: isis_down
+  tools: [get_isis_health, get_isis_neighbors, get_mtu_info]
+  evidence_fields: [state, hold, mtu, isis_log]
+  severity_rules:
+    critical:
+      - state=Down
+      - state=Init
+
+- name: High CPU / memory
+  intent: cpu_high
+  tools: [get_cpu_memory]
+  evidence_fields: [cpu_percent, memory_percent]
+  severity_rules:
+    warning:
+      - cpu_percent&gt;80     <span class="cm"># &gt; operator: triggers if cpu_percent > 80</span>
+      - memory_percent&gt;80
+
+<span class="cm"># Other intents: link_flap, crc_errors, bgp_active,</span>
+<span class="cm">#                route_missing, hardware_fault</span></div>
+    </div>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">call_tool("run_playbook", args)</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_run_playbook(args)</span><span class="cc-file">dispatcher:224</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">get_runner()</span><span class="cc-file">runner.py:470</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">runner.run(intent, params, tool_caller)</span><span class="cc-file">:365</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_find_playbook(intent)</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">for tool: call_tool_unprefixed()</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_evaluate_severity() + _extract_evidence()</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">PlaybookResult</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">playbooks/runner.py:365</span><span class="code-label">the deterministic investigation engine</span></div>
+      <div class="code-body"><span class="kw">async def</span> <span class="fn">run</span>(<span class="var">self</span>, <span class="var">intent</span>: str, <span class="var">params</span>: dict, <span class="var">tool_caller</span>):
+    <span class="cm"># 1. Find which playbook matches this intent</span>
+    <span class="var">playbook</span> = <span class="fn">_find_playbook</span>(<span class="str">"bgp_down"</span>, playbooks)
+    <span class="cm"># → {"name":"BGP neighbor down", "tools":["get_bgp_summary","get_bgp_neighbor_status","get_ping"], ...}</span>
+
+    <span class="cm"># 2. Run each tool in the playbook's list</span>
+    <span class="kw">for</span> <span class="var">tool_name</span> <span class="kw">in</span> [<span class="str">"get_bgp_summary"</span>, <span class="str">"get_bgp_neighbor_status"</span>, <span class="str">"get_ping"</span>]:
+        <span class="var">args</span> = <span class="fn">_build_args</span>(<span class="var">tool_name</span>, <span class="var">params</span>)
+        <span class="cm"># _build_args knows get_bgp_neighbor_status needs (device, neighbor)</span>
+        <span class="cm"># args → {"device": "pe1", "neighbor": "10.0.0.2"}</span>
+
+        <span class="hi"><span class="var">result</span> = <span class="kw">await</span> <span class="fn">tool_caller</span>(<span class="var">tool_name</span>, <span class="var">args</span>)</span>
+        <span class="cm"># tool_caller = dispatcher.call_tool_unprefixed()</span>
+        <span class="cm"># call_tool_unprefixed() → get_vendor("pe1") = "junos"</span>
+        <span class="cm"># → call_tool("junos_get_bgp_summary", args) → Step 11</span>
+
+    <span class="cm"># 3. Score severity against rules</span>
+    <span class="var">severity</span> = <span class="fn">_evaluate_severity</span>(<span class="var">playbook</span>[<span class="str">"severity_rules"</span>], <span class="var">steps</span>)
+    <span class="cm"># severity_rules: {"critical": ["state=Idle", "state=Active"]}</span>
+    <span class="cm"># Walks all result dicts, finds state="Active" → severity = "Critical"</span>
+
+    <span class="cm"># 4. Extract key evidence fields</span>
+    <span class="var">evidence</span> = <span class="fn">_extract_evidence</span>(<span class="var">playbook</span>[<span class="str">"evidence_fields"</span>], <span class="var">steps</span>)
+    <span class="cm"># evidence_fields: ["state","last_error","last_event","flaps"]</span>
+    <span class="cm"># evidence → {"state":"Active","last_error":"Hold timer expired","flaps":2}</span>
+
+    <span class="kw">return</span> <span class="cls">PlaybookResult</span>(severity=<span class="str">"Critical"</span>, evidence=..., summary_text=...)</div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ INPUT — LLM calls run_playbook with</div>
+        <div class="pp-body">{
+  "intent": "bgp_down",
+  "device": "pe1",
+  "neighbor": "10.0.0.2"
+}
+
+# Playbook matched from playbooks.yaml:
+name: "BGP neighbor down"
+intent: "bgp_down"
+tools:
+  - get_bgp_summary
+  - get_bgp_neighbor_status
+  - get_ping
+severity_rules:
+  critical:
+    - state=Idle
+    - state=Active</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← OUTPUT — PlaybookResult → JSON</div>
+        <div class="pp-body">{
+  "playbook": "BGP neighbor down",
+  "severity": "Critical",
+  "evidence": {
+    "state": "Active",
+    "last_error": "Hold timer expired",
+    "flaps": 2
+  },
+  "summary": "[Critical] BGP neighbor down
+    on pe1 -- state: Active
+    last_error: Hold timer expired
+    flaps: 2",
+  "steps_run": 3,
+  "elapsed_ms": 1842
+}</div>
+      </div>
+    </div>
+
+    <div class="explain">
+      <strong>Why use a playbook instead of letting the LLM decide what to check?</strong> Playbooks are deterministic — the same steps every time, measured, logged, with scoring rules. The LLM might forget to check ping, or check things in a different order. A playbook never forgets, always runs in the same order, and returns a structured severity assessment (Critical/Warning/Info) the LLM can reason about.
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 11 ══════════ -->
+<div class="step" id="s11">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--orange-d);border-color:var(--orange-b);color:var(--orange)">📡</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--orange-b),var(--green-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--orange)">Step 11 — Device adapter connects to the router</div>
+        <div class="step-subtitle">junos.py opens a NETCONF session to pe1, fetches real data, parses XML, returns a Python dict.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--orange-d);border-color:var(--orange-b);color:var(--orange)">📄 adapters/devices/junos.py get_bgp_summary()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 adapters/devices/registry.py resolve_host()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 adapters/devices/pool.py SSH connection pool</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">⚙️ settings.py JUNIPER_USER / JUNIPER_PASS</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">get_bgp_summary(device="pe1")</span><span class="cc-file">junos.py</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">run_in_executor(None, _sync_get_bgp_summary, "pe1")</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">resolve_host("pe1")</span><span class="cc-file">registry.py:124</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">get_setting("JUNIPER_USER")</span><span class="cc-file">settings.py</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">PyEZ Device(host, port, user, passwd)</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn cc-ext">NETCONF RPC → router</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">parse XML → dict</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">adapters/devices/junos.py</span><span class="code-label">connecting to the actual Juniper router</span></div>
+      <div class="code-body"><span class="cm"># async wrapper — offloads blocking I/O to a thread pool</span>
+<span class="kw">async def</span> <span class="fn">get_bgp_summary</span>(<span class="var">device</span>: str) -> dict:
+    <span class="kw">return await</span> asyncio.get_event_loop().<span class="fn">run_in_executor</span>(
+        <span class="cls">None</span>, <span class="var">_sync_get_bgp_summary</span>, <span class="var">device</span>
+    )
+<span class="cm"># ↑ "run this blocking code in a background thread"</span>
+<span class="cm">#   so FastAPI's event loop doesn't freeze during the SSH wait</span>
+
+<span class="kw">def</span> <span class="fn">_sync_get_bgp_summary</span>(<span class="var">device</span>: str) -> dict:
+    <span class="cm"># A: resolve device name → IP + port</span>
+    <span class="var">host</span>, <span class="var">port</span> = <span class="fn">resolve_host</span>(<span class="var">device</span>)  <span class="cm"># "pe1" → "66.129.x.x", 33045</span>
+
+    <span class="cm"># B: get credentials (settings.db → env var → error)</span>
+    <span class="var">user</span> = <span class="fn">get_setting</span>(<span class="str">"JUNIPER_USER"</span>)
+    <span class="var">pwd</span>  = <span class="fn">get_setting</span>(<span class="str">"JUNIPER_PASS"</span>)
+
+    <span class="cm"># C: open NETCONF session (PyEZ library)</span>
+    <span class="hi"><span class="kw">with</span> <span class="cls">Device</span>(<span class="var">host</span>=<span class="var">host</span>, <span class="var">port</span>=<span class="var">port</span>, <span class="var">user</span>=<span class="var">user</span>, <span class="var">passwd</span>=<span class="var">pwd</span>) <span class="kw">as</span> <span class="var">dev</span>:</span>
+        <span class="cm"># D: send NETCONF RPC (structured XML over SSH)</span>
+        <span class="var">xml_result</span> = <span class="var">dev</span>.rpc.<span class="fn">get_bgp_summary_information</span>()
+
+        <span class="cm"># E: parse XML → clean Python dict</span>
+        <span class="kw">return</span> {
+            <span class="str">"device"</span>: <span class="var">device</span>,
+            <span class="str">"neighbors"</span>: [{
+                <span class="str">"peer"</span>: str(<span class="var">n</span>.findtext(<span class="str">"peer-address"</span>)),
+                <span class="str">"state"</span>: str(<span class="var">n</span>.findtext(<span class="str">"peer-state"</span>)),
+                <span class="str">"last_error"</span>: str(<span class="var">n</span>.findtext(<span class="str">"last-error"</span>)),
+                <span class="str">"flaps"</span>: int(<span class="var">n</span>.findtext(<span class="str">"flap-count"</span>) <span class="kw">or</span> <span class="num">0</span>),
+            } <span class="kw">for</span> <span class="var">n</span> <span class="kw">in</span> <span class="var">xml_result</span>.findall(<span class="str">".//bgp-peer"</span>)],
+        }</div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ resolve_host("pe1") lookup</div>
+        <div class="pp-body"># registry._cache["pe1"] =
+{
+  "host": "66.129.234.213",
+  "port": 33045,
+  "vendor": "junos",
+  "platform": "junos",
+  "site": ""
+}
+→ host = "66.129.234.213"
+→ port = 33045</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← OUTPUT — parsed dict returned</div>
+        <div class="pp-body">{
+  "device": "pe1",
+  "neighbors": [
+    {
+      "peer": "10.0.0.2",
+      "state": "Active",
+      "last_error": "Hold timer expired",
+      "flaps": 2,
+      "uptime": 0,
+      "received_prefixes": 0
+    }
+  ],
+  "total_peers": 1,
+  "established": 0
+}</div>
+      </div>
+    </div>
+
+    <div class="explain">
+      <strong>Why run_in_executor?</strong> NETCONF/SSH is <em>blocking</em> — the Python code stops and waits (sometimes 2-5 seconds) for the router to reply. FastAPI runs on an async event loop that can't freeze. <span class="em">run_in_executor</span> moves blocking code into a separate OS thread so the event loop stays free to handle other requests. <strong>Connection pool</strong> (pool.py): SSH connections are cached for 60s — so the second call to the same router reuses the open session instead of reconnecting.
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 12 ══════════ -->
+<div class="step" id="s12">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--green-d);border-color:var(--green-b);color:var(--green)">📨</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--green-b),var(--purple-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--green)">Step 12 — Tool result fed back to the LLM</div>
+        <div class="step-subtitle">The device output is appended to the messages list as role:"tool". The LLM is called again — now it can see the router data.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--green-d);border-color:var(--green-b);color:var(--green)">📄 app.py:776 _agentic_loop() — appending tool results</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">_exec_one(tc)</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">returns (end_event, tool_msg)</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">yield end_event</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">messages.append(tool_msg)</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">loop continues → LLM called again (step 8 repeats)</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">app.py:776</span><span class="code-label">appending tool result then calling LLM again</span></div>
+      <div class="code-body"><span class="cm"># _exec_one() returns two things:</span>
+<span class="var">end_event</span> = {<span class="str">"type"</span>: <span class="str">"tool_end"</span>, <span class="str">"name"</span>: <span class="str">"junos_get_bgp_summary"</span>, <span class="str">"ms"</span>: <span class="num">1241</span>}
+<span class="var">tool_msg</span>  = {
+    <span class="str">"role"</span>:         <span class="str">"tool"</span>,
+    <span class="str">"tool_call_id"</span>: <span class="str">"call_Abc123"</span>,    <span class="cm"># must match the LLM's call id</span>
+    <span class="str">"name"</span>:         <span class="str">"junos_get_bgp_summary"</span>,
+    <span class="str">"content"</span>:      json.dumps(<span class="var">result</span>)  <span class="cm"># the dict from Step 11</span>
+}
+
+<span class="cm"># Both are yielded / appended</span>
+<span class="kw">yield</span> <span class="var">end_event</span>           <span class="cm"># UI shows "✓ junos_get_bgp_summary (1241ms)"</span>
+<span class="var">messages</span>.append(<span class="var">tool_msg</span>) <span class="cm"># LLM can now see the router data</span>
+
+<span class="cm"># Messages list at this point:</span>
+<span class="hi"><span class="var">messages</span> = [</span>
+    {<span class="str">"role"</span>: <span class="str">"system"</span>,    <span class="str">"content"</span>: <span class="str">"...device inventory..."</span>},
+    {<span class="str">"role"</span>: <span class="str">"user"</span>,      <span class="str">"content"</span>: <span class="str">"Why is BGP down on pe1?"</span>},
+    {<span class="str">"role"</span>: <span class="str">"assistant"</span>, <span class="str">"tool_calls"</span>: [{<span class="str">"name"</span>:<span class="str">"junos_get_bgp_summary"</span>}]},
+    {<span class="str">"role"</span>: <span class="str">"tool"</span>,      <span class="str">"content"</span>: <span class="str">'{"state":"Active","last_error":"Hold timer expired"}'</span>},
+<span class="hi">]</span>
+<span class="cm"># ↑ LLM is called again (turn 2 of agentic loop)</span></div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ Tool result from Step 11</div>
+        <div class="pp-body">{
+  "device": "pe1",
+  "neighbors": [{
+    "peer": "10.0.0.2",
+    "state": "Active",
+    "last_error": "Hold timer expired",
+    "flaps": 2
+  }],
+  "total_peers": 1,
+  "established": 0
+}</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← Tool message appended to conversation</div>
+        <div class="pp-body">{
+  "role": "tool",
+  "tool_call_id": "call_Abc123",
+  "name": "junos_get_bgp_summary",
+  "content": "{\"device\":\"pe1\",
+    \"neighbors\":[{\"peer\":\"10.0.0.2\",
+    \"state\":\"Active\",
+    \"last_error\":\"Hold timer expired\",
+    \"flaps\":2}],
+    \"total_peers\":1,
+    \"established\":0}"
+}
+// LLM called again → may call run_playbook
+// or directly write final answer</div>
+      </div>
+    </div>
+
+    <div class="explain">
+      <strong>Why must tool results go back as role:"tool" messages?</strong> The OpenAI API requires it — the conversation protocol is: <em>user asks → assistant calls tool → tool result added → assistant reads result → answers</em>. The <span class="em">tool_call_id</span> must match so the LLM can correlate which result belongs to which call (important when 3+ tools are called in parallel).
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 13 ══════════ -->
+<div class="step" id="s13">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">✍️</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--purple-b),var(--green-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--purple)">Step 13 — LLM writes the final answer</div>
+        <div class="step-subtitle">LLM sees all tool results and returns plain text (no more tool_calls). Loop stops. _run_chat() collects the reply.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">📄 app.py:761 _agentic_loop() — final LLM response</span>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">app.py:760</span><span class="code-label">full messages array at final LLM call</span></div>
+      <div class="code-body"><span class="cm"># After 2 rounds: get_bgp_summary + run_playbook</span>
+<span class="var">messages</span> = [
+  {<span class="str">"role"</span>: <span class="str">"system"</span>,    <span class="str">"content"</span>: <span class="str">"...rules + pe1=junos..."</span>},
+  {<span class="str">"role"</span>: <span class="str">"user"</span>,      <span class="str">"content"</span>: <span class="str">"check CPU on pe1"</span>},       <span class="cm"># prior turn</span>
+  {<span class="str">"role"</span>: <span class="str">"assistant"</span>, <span class="str">"content"</span>: <span class="str">"CPU is 23%..."</span>},            <span class="cm"># prior turn</span>
+  {<span class="str">"role"</span>: <span class="str">"user"</span>,      <span class="str">"content"</span>: <span class="str">"Why is BGP down on pe1?"</span>}, <span class="cm"># current</span>
+  {<span class="str">"role"</span>: <span class="str">"assistant"</span>, <span class="str">"tool_calls"</span>: [{<span class="str">"name"</span>: <span class="str">"junos_get_bgp_summary"</span>}]},
+  {<span class="str">"role"</span>: <span class="str">"tool"</span>,      <span class="str">"content"</span>: <span class="str">'{"state":"Active","flaps":2}'</span>},
+  {<span class="str">"role"</span>: <span class="str">"assistant"</span>, <span class="str">"tool_calls"</span>: [{<span class="str">"name"</span>: <span class="str">"run_playbook"</span>}]},
+  {<span class="str">"role"</span>: <span class="str">"tool"</span>,      <span class="str">"content"</span>: <span class="str">'{"severity":"Critical","evidence":{...}}'</span>},
+]
+
+<span class="var">msg</span> = <span class="var">response</span>.choices[<span class="num">0</span>].message
+<span class="hi"><span class="kw">if not</span> <span class="var">msg</span>.tool_calls:  <span class="cm"># ← no more tool calls → done</span></span>
+    <span class="kw">yield</span> {<span class="str">"type"</span>: <span class="str">"reply"</span>, <span class="str">"content"</span>: <span class="var">msg</span>.content}
+    <span class="kw">return</span>  <span class="cm"># exits _agentic_loop()</span></div>
+    </div>
+
+    <div class="result-box result-info">
+      <strong>The LLM's final reply:</strong><br><br>
+      <span style="color:var(--text)">"<strong>BGP session to pe2 is Critical.</strong> The session on pe1 is stuck in <strong>Active</strong> state — it's trying to connect to 10.0.0.2 but failing. <strong>Last error: Hold timer expired</strong> (2 flaps in the last 10 minutes). This typically means one of:<br>1. MTU mismatch on the pe1–pe2 link (BGP packets too large)<br>2. BGP authentication key mismatch<br>3. pe2 is unreachable or its BGP process has crashed<br><br><strong>Recommended next steps:</strong><br>• Check MTU on both sides: <code>show interfaces pe-0/0/0 detail</code><br>• Verify authentication: <code>show bgp neighbor 10.0.0.2</code><br>• Ping pe2 loopback from pe1<br>• Check if pe2 BGP process is running"</span>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 14 ══════════ -->
+<div class="step" id="s14">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--green-d);border-color:var(--green-b);color:var(--green)">💾</div>
+    <div class="step-line" style="background:linear-gradient(to bottom,var(--green-b),var(--blue-b))"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--green)">Step 14 — Save to memory + audit log</div>
+        <div class="step-subtitle">_save_memory() writes the Q&A pair to memory.db. _audit_log() writes a structured JSON event to audit.log.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--green-d);border-color:var(--green-b);color:var(--green)">📄 app.py:414 _save_memory()</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">🗄️ memory.db SQLite</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 app.py:584 _audit_log()</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">_run_chat()</span><span class="cc-file">:841</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">_save_memory(user, turns)</span><span class="cc-file">:414</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">sqlite3.connect("memory.db")</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">INSERT INTO memory</span>
+      <span class="cc-arr">+</span>
+      <span class="cc-fn">DELETE old rows (retention policy)</span>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-filename">app.py:414</span><span class="code-label">saving to SQLite + pruning old messages</span></div>
+      <div class="code-body"><span class="kw">def</span> <span class="fn">_save_memory</span>(<span class="var">user</span>: str, <span class="var">turns</span>: list[dict]):
+    <span class="var">now</span> = time.time()
+    <span class="var">retention_days</span> = <span class="fn">get_setting_int</span>(<span class="str">"CHAT_RETENTION_DAYS"</span>, <span class="num">14</span>)
+    <span class="var">cutoff</span> = <span class="var">now</span> - <span class="var">retention_days</span> * <span class="num">86400</span>  <span class="cm"># 14 days ago</span>
+
+    <span class="kw">with</span> sqlite3.connect(<span class="str">"memory.db"</span>) <span class="kw">as</span> <span class="var">conn</span>:
+        <span class="cm"># INSERT both turns (user question + assistant answer)</span>
+        <span class="hi"><span class="var">conn</span>.executemany(</span>
+            <span class="str">"INSERT INTO memory (user, role, content, created_at) VALUES (?,?,?,?)"</span>,
+            [(<span class="var">user</span>, <span class="var">t</span>[<span class="str">"role"</span>], <span class="var">t</span>[<span class="str">"content"</span>], <span class="var">now</span>) <span class="kw">for</span> <span class="var">t</span> <span class="kw">in</span> <span class="var">turns</span>]
+        <span class="hi">)</span>
+        <span class="cm"># DELETE messages older than retention window</span>
+        <span class="var">conn</span>.execute(<span class="str">"DELETE FROM memory WHERE created_at < ?"</span>, (<span class="var">cutoff</span>,))
+        <span class="cm"># PRUNE to max 24 rows per user (12 turns)</span>
+        <span class="var">conn</span>.execute(
+            <span class="str">"DELETE FROM memory WHERE user=? AND id NOT IN "</span>
+            <span class="str">"(SELECT id FROM memory WHERE user=? ORDER BY id DESC LIMIT ?)"</span>,
+            (<span class="var">user</span>, <span class="var">user</span>, <span class="num">24</span>)
+        )</div>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-in">
+        <div class="pp-label">→ turns saved to memory.db</div>
+        <div class="pp-body">[
+  {
+    "role": "user",
+    "content": "Why is BGP down on pe1?"
+  },
+  {
+    "role": "assistant",
+    "content": "BGP session to pe2 is Critical.
+      The session is stuck in Active state..."
+  }
+]</div>
+      </div>
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← audit.log JSON event</div>
+        <div class="pp-body">{
+  "ts": "2026-02-28T14:23:11",
+  "level": "INFO",
+  "logger": "netcopilot.audit",
+  "message": "{
+    \"event\": \"tool_call\",
+    \"request_id\": \"abc-xyz-123\",
+    \"name\": \"junos_get_bgp_summary\",
+    \"user\": \"syed\",
+    \"role\": \"noc-ticket\",
+    \"ms\": 1241,
+    \"error\": false
+  }"
+}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════ STEP 15 ══════════ -->
+<div class="step" id="s15">
+  <div class="step-connector">
+    <div class="step-circle" style="background:var(--blue-d);border-color:var(--blue-b);color:var(--blue)">🎉</div>
+    <div class="step-line" style="background:none;min-height:0"></div>
+  </div>
+  <div class="step-body">
+    <div class="step-header">
+      <div>
+        <div class="step-title" style="color:var(--blue)">Step 15 — Reply sent back to you</div>
+        <div class="step-subtitle">_run_chat() returns a dict. FastAPI serializes it to JSON. Browser displays it. Slack posts it. Streaming path sends SSE events.</div>
+      </div>
+    </div>
+
+    <span class="file-badge" style="background:var(--blue-d);border-color:var(--blue-b);color:var(--blue)">📄 app.py:848 _run_chat() return</span>
+    <span class="file-badge" style="background:var(--bg3);border-color:var(--border);color:var(--muted)">📄 app.py:902 /chat/stream SSE path</span>
+
+    <div class="call-chain">
+      <span class="cc-label">call chain</span>
+      <span class="cc-fn">_run_chat()</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">returns {"request_id":..., "reply":...}</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">FastAPI serializes to JSON</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">HTTP 200 response</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">Browser JS reads response.json()</span>
+      <span class="cc-arr">→</span>
+      <span class="cc-fn">displays in chat UI</span>
+    </div>
+
+    <div class="payload-row">
+      <div class="payload-panel pp-out">
+        <div class="pp-label">← /chat response JSON</div>
+        <div class="pp-body">HTTP 200 OK
+Content-Type: application/json
+
+{
+  "request_id": "abc-xyz-123",
+  "reply": "BGP session to pe2 is Critical.
+    The session on pe1 is stuck in Active
+    state — it's trying to connect to
+    10.0.0.2 but failing. Last error:
+    Hold timer expired (2 flaps)..."
+}</div>
+      </div>
+      <div class="payload-panel pp-out" style="border-color:var(--purple-b)">
+        <div class="pp-label" style="background:var(--purple-d);color:var(--purple)">← /chat/stream SSE events (real-time)</div>
+        <div class="pp-body">data: {"type":"tool_start",
+  "name":"junos_get_bgp_summary",
+  "args":{"device":"pe1"}}
+
+data: {"type":"tool_end",
+  "name":"junos_get_bgp_summary",
+  "ms":1241}
+
+data: {"type":"tool_start",
+  "name":"run_playbook",
+  "args":{"intent":"bgp_down","device":"pe1"}}
+
+data: {"type":"tool_end",
+  "name":"run_playbook","ms":1842}
+
+data: {"type":"reply",
+  "content":"BGP session to pe2 is Critical..."}
+
+data: {"type":"done"}</div>
+      </div>
+    </div>
+
+    <div class="explain">
+      <strong>Two delivery paths:</strong> <span class="em">/chat</span> waits for the full answer then returns one JSON response. <span class="em">/chat/stream</span> streams each event as it happens — the UI shows "🔧 calling junos_get_bgp_summary..." in real time while waiting. For <strong>Slack</strong>: the slash command immediately returns "Working on it..." (ephemeral), then a background thread posts the final answer to Slack's <em>response_url</em> webhook.
+    </div>
+  </div>
+</div>
+
+
+<!-- FULL SUMMARY -->
+<div style="margin-top:48px;padding:24px;background:var(--bg2);border:1px solid var(--border);border-radius:12px">
+  <div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:16px">Complete picture — all 15 steps + call chains</div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:20px">
+    <span class="pill p-purple">⚡ startup → registry + MCP</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-blue">1 POST /chat (browser)</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-green">2 chat() app.py:895</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-red">3 _get_role_from_request()</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-orange">4 _is_config_request()</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-purple">5 _load_memory() → memory.db</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-yellow">6 get_all_tools(role) → dispatcher</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-purple">7 build_system_prompt() → prompts.py</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-purple">8 llm_adapter.chat() → OpenAI API</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-purple">9 msg.tool_calls → asyncio.gather()</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-yellow">10 call_tool() → correct_vendor → _call_adapter_tool()</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-purple">10b run_playbook → runner.run() → evidence + severity</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-orange">11 junos.py → run_in_executor → NETCONF → parse XML</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-green">12 messages.append(role:"tool") → LLM called again</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-purple">13 msg.content (no tool_calls) → yield reply</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-green">14 _save_memory() → memory.db + audit.log</span>
+    <span style="color:var(--dim)">→</span>
+    <span class="pill p-blue">15 {"request_id":..., "reply":...} → HTTP 200</span>
+  </div>
+
+  <div style="font-size:.68rem;color:var(--muted);border-top:1px solid var(--border);padding-top:14px;line-height:1.8">
+    <strong style="color:var(--text)">Key data flows:</strong> &nbsp;
+    <span class="pill p-cyan">JSON payload</span> HTTP POST body →
+    <span class="pill p-green">ChatRequest</span> FastAPI model →
+    <span class="pill p-yellow">tool defs</span> OpenAI function format →
+    <span class="pill p-purple">messages[]</span> LLM conversation →
+    <span class="pill p-orange">NETCONF XML</span> router response →
+    <span class="pill p-green">role:"tool" message</span> back to LLM →
+    <span class="pill p-blue">{"reply":...}</span> final HTTP response
+  </div>
+</div>
+
+
+</div><!-- end page -->
+</body>
+</html>

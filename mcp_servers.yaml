@@ -1,0 +1,45 @@
+# NetCopilot MCP Server Registry
+#
+# ARCHITECTURE:
+#   Device vendors (cisco, junos, nokia) → direct Python adapters in adapters/devices/
+#   Integration tools you own (prometheus, syslog) → direct adapters in adapters/integrations/
+#   Vendor-maintained MCP servers → listed here (they maintain, we just connect)
+#
+# Transport options:
+#   sse              — classic SSE transport (url must end in /sse)
+#   streamable_http  — newer unified transport (url is the base endpoint)
+#
+# To add a new vendor integration: add an entry here + run the MCP server.
+# To add a new device vendor: add adapters/devices/{vendor}.py instead.
+
+servers:
+
+  # ---------------------------------------------------------------------------
+  # Jira — mcp-atlassian (pip install mcp-atlassian)
+  # Provides 65 Jira tools: search, create, update, transition, comments, sprints…
+  # Atlassian maintains it; we never have to update our Jira httpx code again.
+  # Runs alongside the app as a Docker sidecar on port 8104.
+  # ---------------------------------------------------------------------------
+  - name: jira
+    url: http://localhost:8104/sse      # override with JIRA_MCP_URL env var (e.g. in Docker: http://jira-mcp:8104/sse)
+    transport: sse
+    roles: [noc-ticket, admin]
+    enabled: true
+    description: "mcp-atlassian — full Jira CRUD + search (vendor-maintained)"
+
+  # ---------------------------------------------------------------------------
+  # Prometheus / Syslog — kept as direct adapters (simple httpx, rarely changes)
+  # ---------------------------------------------------------------------------
+  - name: prometheus
+    url: http://localhost:8105/sse
+    transport: sse
+    roles: [noc, noc-ticket, admin]
+    enabled: false
+    description: "DISABLED — replaced by adapters/integrations/prometheus.py"
+
+  - name: syslog
+    url: http://localhost:8106/sse
+    transport: sse
+    roles: [noc, noc-ticket, admin]
+    enabled: false
+    description: "DISABLED — replaced by adapters/integrations/syslog.py"

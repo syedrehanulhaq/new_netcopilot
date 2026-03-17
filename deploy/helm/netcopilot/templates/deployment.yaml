@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "netcopilot.fullname" . }}
+  labels:
+    app: {{ include "netcopilot.name" . }}
+
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "netcopilot.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "netcopilot.name" . }}
+    spec:
+      serviceAccountName: {{ default (include "netcopilot.fullname" .) .Values.serviceAccount.name }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: netcopilot
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8001
+          envFrom:
+            - configMapRef:
+                name: {{ include "netcopilot.fullname" . }}-config
+            - secretRef:
+                name: {{ include "netcopilot.fullname" . }}-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: devices
+              mountPath: /app/devices.yaml
+              subPath: devices.yaml
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+      volumes:
+        - name: data
+{{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "netcopilot.fullname" . }}-data
+{{- else }}
+          emptyDir: {}
+{{- end }}
+        - name: devices
+          configMap:
+            name: {{ include "netcopilot.fullname" . }}-devices

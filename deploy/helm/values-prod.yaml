@@ -1,0 +1,84 @@
+image:
+  repository: netcopilot
+  tag: prod
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: netcopilot.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: netcopilot-tls
+      hosts:
+        - netcopilot.example.com
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+config:
+  LOG_LEVEL: INFO
+  RATE_LIMIT_PER_MIN: "120"
+  DEVICE_REGISTRY_PATH: /app/devices.yaml
+  LLM_PROVIDER: local
+  LOCAL_LLM_BASE_URL: http://litellm:4000/v1
+  LOCAL_LLM_MODEL: claude-haiku
+
+secrets:
+  OPENAI_API_KEY: ""
+  CISCO_USER: "REPLACE_ME"
+  CISCO_PASS: "REPLACE_ME"
+  JUNIPER_USER: "REPLACE_ME"
+  JUNIPER_PASS: "REPLACE_ME"
+  NOKIA_USER: ""
+  NOKIA_PASS: ""
+  SESSION_SECRET: "REPLACE_ME"
+  SLACK_BOT_TOKEN: ""
+  SLACK_SIGNING_SECRET: ""
+  SLACK_VERIFICATION_TOKEN: ""
+  JIRA_BASE_URL: ""
+  JIRA_EMAIL: ""
+  JIRA_API_TOKEN: ""
+  JIRA_PROJECT_KEY: ""
+  JIRA_DEFAULT_ISSUE_TYPE: "Task"
+  JIRA_DEFAULT_PRIORITY: "Medium"
+  JIRA_DEFAULT_TEAM: "NOC"
+  ALERT_INGEST_TOKEN: ""
+
+inventory:
+  cisco_devices:
+    sandbox-iosxr-1: sandbox-iosxr-1.cisco.com
+  juniper_devices:
+    sandbox-junos-1: "66.129.234.203:45003"
+    sandbox-junos-2: "66.129.234.203:45007"
+    pe1: "66.129.234.213:33045"
+    p5: "66.129.234.213:33033"
+  nokia_devices: {}
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  ingressNamespace: ingress-nginx
+
+serviceAccount:
+  create: true
+  name: ""

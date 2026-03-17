@@ -1,25 +1,31 @@
+import asyncio
 import base64
+import csv
 import hashlib
 import hmac
 import json
 import logging
+import logging.handlers
 import os
 import re
 import sqlite3
+import sys
 import threading
 import time
 import uuid
-from logging.handlers import RotatingFileHandler
-
+from contextlib import asynccontextmanager
 from typing import Any, Optional
-
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
-from starlette.middleware.sessions import SessionMiddleware
+import yaml
+from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from openai import OpenAI
+from starlette.middleware.sessions import SessionMiddleware
+
+from adapters.chat import get_slack_adapter
+from adapters.llm import get_llm_adapter
 from config import (
     AUTH0_AUDIENCE,
     AUTH0_CALLBACK_URL,
@@ -31,108 +37,185 @@ from config import (
     AUTH0_GROUP_ROLE_MAP,
     AUTH0_LOGOUT_URL,
     AUTH0_ROLE_CLAIM,
-    CISCO_DEVICES,
+    ALERT_INGEST_TOKEN,
     JIRA_BASE_URL,
     JIRA_DEFAULT_ISSUE_TYPE,
     JIRA_DEFAULT_PRIORITY,
     JIRA_DEFAULT_TEAM,
+    LOG_DIR,
     LOG_LEVEL,
-    LLM_PROVIDER,
-    LOCAL_LLM_API_KEY,
-    LOCAL_LLM_BASE_URL,
-    LOCAL_LLM_MODEL,
+    LOG_TO_FILE,
     NETCOPILOT_API_KEYS,
-    OPENAI_MODEL,
-    OPENAI_API_KEY,
     RATE_LIMIT_PER_MIN,
     SESSION_SECRET,
     SLACK_ALERT_CHANNEL,
     SLACK_BOT_TOKEN,
+    SLACK_ROLE,
     SLACK_SIGNING_SECRET,
     SLACK_VERIFICATION_TOKEN,
-    SLACK_ROLE,
-    TEAMS_VERIFICATION_TOKEN,
     TEAMS_ROLE,
-    ALERT_INGEST_TOKEN,
+    TEAMS_VERIFICATION_TOKEN,
+    reload_inventory_devices,
 )
-from tools.device_access import get_interface_health, get_interface_status
-from llm.prompts import SYSTEM_PROMPT
-from llm.tools import TOOLS
-from tools.counters import get_interface_counters
-from tools.flapping import get_top_flapping_links
-from tools.jira import add_ticket_comment, close_ticket, create_ticket
-from tools.operations import (
-    get_acl_hits,
-    get_bgp_neighbor_status,
-    get_bgp_route,
-    get_chassis_health,
-    get_cpu_memory,
-    get_link_health,
-    get_isis_health,
-    get_isis_neighbors,
-    get_mtu_info,
-    get_ospf_neighbors,
-    get_ping,
-    get_route_lookup,
-    get_traceroute,
+from adapters.devices.dispatcher import ToolDispatcher
+from adapters.devices.registry import device_inventory_summary, reload_registry
+from llm.prompts import build_system_prompt
+from mcp_client.client import MCPClient
+from playbooks.store import (
+    delete_playbook,
+    format_playbook_summary,
+    list_playbooks,
+    upsert_playbooks,
 )
-from settings import get_setting, list_settings, set_settings
+from settings import (
+    get_setting,
+    get_setting_bool,
+    get_setting_int,
+    list_settings,
+    set_settings,
+)
 
-# ---------- CONFIG ----------
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
 
-if LLM_PROVIDER == "openai" and not OPENAI_API_KEY:
-    print("WARNING: OPENAI_API_KEY is not set. The /chat endpoint will not work.")
+APP_VERSION = "2.0.0"
 
-if LLM_PROVIDER == "local":
-    if not LOCAL_LLM_BASE_URL:
-        print("WARNING: LOCAL_LLM_BASE_URL is not set. The /chat endpoint will not work.")
-    client = OpenAI(api_key=LOCAL_LLM_API_KEY, base_url=LOCAL_LLM_BASE_URL)
-else:
-    client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="NetCopilot - Cisco IOS XR Edition")
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=True)
 
-APP_VERSION = "0.1.0"
 
 logger = logging.getLogger("netcopilot")
 logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
 if not logger.handlers:
-    os.makedirs("logs", exist_ok=True)
-    handler = RotatingFileHandler("logs/netcopilot.log", maxBytes=1_000_000, backupCount=3)
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    if LOG_TO_FILE:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        _handler: logging.Handler = logging.handlers.RotatingFileHandler(
+            os.path.join(LOG_DIR, "netcopilot.log"),
+            maxBytes=1_000_000,
+            backupCount=3,
+        )
+    else:
+        _handler = logging.StreamHandler(sys.stdout)
+    _handler.setFormatter(JsonFormatter())
+    logger.addHandler(_handler)
 
 audit_logger = logging.getLogger("netcopilot.audit")
 audit_logger.setLevel(logging.INFO)
 if not audit_logger.handlers:
-    audit_handler = RotatingFileHandler("logs/audit.log", maxBytes=1_000_000, backupCount=5)
-    audit_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    audit_logger.addHandler(audit_handler)
+    if LOG_TO_FILE:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        _audit_handler: logging.Handler = logging.handlers.RotatingFileHandler(
+            os.path.join(LOG_DIR, "audit.log"),
+            maxBytes=1_000_000,
+            backupCount=5,
+        )
+    else:
+        _audit_handler = logging.StreamHandler(sys.stdout)
+    _audit_handler.setFormatter(JsonFormatter())
+    audit_logger.addHandler(_audit_handler)
 
-_metrics_lock = threading.Lock()
-_metrics = {
-    "requests_total": 0,
-    "tool_calls_total": 0,
-    "tool_errors_total": 0,
-    "tool_counts": {},
-}
 
-_rate_limit_lock = threading.Lock()
-_rate_limit_window = 60
-_rate_limit_max = RATE_LIMIT_PER_MIN
-_rate_limit: dict[str, list[float]] = {}
+# ---------------------------------------------------------------------------
+# App lifespan
+# ---------------------------------------------------------------------------
 
-_memory_lock = threading.Lock()
-_memory_limit = 12
-_memory_db_path = "memory.db"
-_alert_db_path = "alerts.db"
+_mcp_client: Optional[MCPClient] = None
+_dispatcher: Optional[ToolDispatcher] = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _mcp_client, _dispatcher
+    if SESSION_SECRET == "change-me":
+        logger.warning(
+            "SESSION_SECRET is set to the insecure default 'change-me'. "
+            "Set a strong random value in production."
+        )
+    if not NETCOPILOT_API_KEYS and not AUTH0_DOMAIN:
+        logger.warning(
+            "No API keys and no AUTH0_DOMAIN configured — all requests get admin access. "
+            "Set NETCOPILOT_API_KEYS or AUTH0_DOMAIN before deploying."
+        )
+    _init_memory_db()
+    _init_alerts_db()
+    reload_registry()
+    _mcp_client = MCPClient(config_path="mcp_servers.yaml")
+    await _mcp_client.start()
+    _dispatcher = ToolDispatcher(mcp_client=_mcp_client)
+    logger.info(
+        "startup version=%s vendor_mcp_connected=%d",
+        APP_VERSION,
+        len(_mcp_client._connections),
+    )
+    yield
+    await _mcp_client.stop()
+
+
+app = FastAPI(title="NetCopilot", lifespan=lifespan)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    same_site="lax",
+    https_only=False,
+)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+# Security headers on every response
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("X-XSS-Protection", "1; mode=block")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        return response
+
+app.add_middleware(_SecurityHeadersMiddleware)
+
+
+# ---------------------------------------------------------------------------
+# Auth0 OAuth (optional)
+# ---------------------------------------------------------------------------
+
+if AUTH0_DOMAIN:
+    from authlib.integrations.starlette_client import OAuth
+
+    oauth = OAuth()
+    oauth.register(
+        name="auth0",
+        client_id=AUTH0_CLIENT_ID,
+        client_secret=AUTH0_CLIENT_SECRET,
+        server_metadata_url=f"https://{AUTH0_DOMAIN}/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid profile email"},
+    )
+else:
+    oauth = None
+
+
+# ---------------------------------------------------------------------------
+# Settings schema (for admin UI)
+# ---------------------------------------------------------------------------
 
 _SETTINGS_SCHEMA = [
-    {"key": "LLM_PROVIDER", "label": "LLM provider", "category": "LLM"},
+    {"key": "LLM_PROVIDER", "label": "LLM provider (openai / anthropic / local)", "category": "LLM"},
     {"key": "OPENAI_API_KEY", "label": "OpenAI API key", "category": "LLM", "secret": True},
     {"key": "OPENAI_MODEL", "label": "OpenAI model", "category": "LLM"},
+    {"key": "ANTHROPIC_API_KEY", "label": "Anthropic API key", "category": "LLM", "secret": True},
+    {"key": "ANTHROPIC_MODEL", "label": "Anthropic model", "category": "LLM"},
     {"key": "LOCAL_LLM_BASE_URL", "label": "Local LLM base URL", "category": "LLM"},
     {"key": "LOCAL_LLM_API_KEY", "label": "Local LLM API key", "category": "LLM", "secret": True},
     {"key": "LOCAL_LLM_MODEL", "label": "Local LLM model", "category": "LLM"},
@@ -151,6 +234,24 @@ _SETTINGS_SCHEMA = [
     {"key": "NETBOX_MANUFACTURER_CISCO", "label": "NetBox Cisco manufacturer", "category": "Inventory"},
     {"key": "NETBOX_MANUFACTURER_JUNIPER", "label": "NetBox Juniper manufacturer", "category": "Inventory"},
     {"key": "NETBOX_MANUFACTURER_NOKIA", "label": "NetBox Nokia manufacturer", "category": "Inventory"},
+    {"key": "NAUTOBOT_URL", "label": "Nautobot URL", "category": "Inventory"},
+    {"key": "NAUTOBOT_TOKEN", "label": "Nautobot token", "category": "Inventory", "secret": True},
+    {"key": "NAUTOBOT_VERIFY_SSL", "label": "Nautobot verify SSL", "category": "Inventory"},
+    {"key": "NAUTOBOT_FILTER", "label": "Nautobot filter query", "category": "Inventory"},
+    {"key": "NAUTOBOT_MANUFACTURER_CISCO", "label": "Nautobot Cisco manufacturer", "category": "Inventory"},
+    {"key": "NAUTOBOT_MANUFACTURER_JUNIPER", "label": "Nautobot Juniper manufacturer", "category": "Inventory"},
+    {"key": "NAUTOBOT_MANUFACTURER_NOKIA", "label": "Nautobot Nokia manufacturer", "category": "Inventory"},
+    {
+        "key": "INVENTORY_WEBHOOK_TOKEN",
+        "label": "Inventory webhook token (X-Webhook-Token)",
+        "category": "Inventory",
+        "secret": True,
+    },
+    {
+        "key": "INVENTORY_WEBHOOK_DEBOUNCE_SECONDS",
+        "label": "Inventory webhook debounce (seconds)",
+        "category": "Inventory",
+    },
     {"key": "JIRA_BASE_URL", "label": "Jira base URL", "category": "Ticketing"},
     {"key": "JIRA_EMAIL", "label": "Jira email", "category": "Ticketing"},
     {"key": "JIRA_API_TOKEN", "label": "Jira API token", "category": "Ticketing", "secret": True},
@@ -168,6 +269,9 @@ _SETTINGS_SCHEMA = [
     {"key": "PROMETHEUS_URL", "label": "Prometheus base URL", "category": "Prometheus"},
     {"key": "PROMETHEUS_FLAP_QUERY", "label": "Flap query", "category": "Prometheus"},
     {"key": "PROMETHEUS_LAST_FLAP_QUERY", "label": "Last flap query", "category": "Prometheus"},
+    {"key": "SYSLOG_URL", "label": "Syslog/Loki query URL", "category": "Syslog"},
+    {"key": "SYSLOG_TOKEN", "label": "Syslog API token", "category": "Syslog", "secret": True},
+    {"key": "SYSLOG_QUERY_PARAM", "label": "Syslog query param", "category": "Syslog"},
     {"key": "ALERT_INGEST_TOKEN", "label": "Alert ingest token", "category": "Alerts", "secret": True},
     {"key": "AUTH0_DOMAIN", "label": "Auth0 domain", "category": "Auth"},
     {"key": "AUTH0_CLIENT_ID", "label": "Auth0 client ID", "category": "Auth"},
@@ -181,9 +285,58 @@ _SETTINGS_SCHEMA = [
     {"key": "AUTH0_GROUP_ROLE_MAP", "label": "Auth0 group role map", "category": "Auth"},
     {"key": "NETCOPILOT_API_KEYS", "label": "API keys (key:role)", "category": "Security", "secret": True},
     {"key": "RATE_LIMIT_PER_MIN", "label": "Rate limit per minute", "category": "Security"},
+    {"key": "TOOL_ALLOWLIST", "label": "Tool allowlist (comma-separated)", "category": "Security"},
+    {"key": "TOOL_DENYLIST", "label": "Tool denylist (comma-separated)", "category": "Security"},
+    {"key": "CHAT_RETENTION_DAYS", "label": "Chat retention (days)", "category": "Security"},
+    {"key": "ALERT_RETENTION_DAYS", "label": "Alert retention (days)", "category": "Security"},
+    {"key": "LOG_REDACTION_ENABLED", "label": "Log redaction enabled", "category": "Security"},
+    {"key": "LOG_REDACTION_FIELDS", "label": "Log redaction fields", "category": "Security"},
     {"key": "SESSION_SECRET", "label": "Session secret", "category": "Security", "secret": True},
+    {"key": "LOG_TO_FILE", "label": "Log to file (true/false)", "category": "Logging"},
+    {"key": "LOG_DIR", "label": "Log directory", "category": "Logging"},
 ]
 
+
+# ---------------------------------------------------------------------------
+# Rate limiting, metrics
+# ---------------------------------------------------------------------------
+
+_metrics_lock = threading.Lock()
+_metrics: dict[str, Any] = {
+    "requests_total": 0,
+    "tool_calls_total": 0,
+    "tool_errors_total": 0,
+    "tool_counts": {},
+}
+
+_rate_limit_lock = threading.Lock()
+_rate_limit: dict[str, list[float]] = {}
+_rate_limit_window = 60
+_rate_limit_max = RATE_LIMIT_PER_MIN
+
+
+_RATE_LIMIT_MAX_CLIENTS = 10_000  # cap dict size to prevent unbounded growth
+
+
+def _enforce_rate_limit(client_id: str) -> None:
+    now = time.time()
+    with _rate_limit_lock:
+        timestamps = [ts for ts in _rate_limit.get(client_id, []) if now - ts < _rate_limit_window]
+        if len(timestamps) >= _rate_limit_max:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded.")
+        timestamps.append(now)
+        _rate_limit[client_id] = timestamps
+        # Evict fully-expired entries when dict grows too large
+        if len(_rate_limit) > _RATE_LIMIT_MAX_CLIENTS:
+            stale = [k for k, v in _rate_limit.items()
+                     if k != client_id and not any(now - ts < _rate_limit_window for ts in v)]
+            for k in stale:
+                del _rate_limit[k]
+
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
 
 def _parse_api_keys() -> dict[str, str]:
     keys: dict[str, str] = {}
@@ -202,16 +355,14 @@ def _parse_api_keys() -> dict[str, str]:
 def _get_role_from_request(request: Request) -> str:
     keys = _parse_api_keys()
     if not keys and not AUTH0_DOMAIN:
-        return "noc"
+        return "admin"
     api_key = request.headers.get("X-API-Key", "")
     role = keys.get(api_key)
     if role:
         return role
-
     user = request.session.get("user") if hasattr(request, "session") else None
     if user:
         return user.get("role", AUTH0_DEFAULT_ROLE)
-
     raise HTTPException(status_code=403, detail="Invalid API key.")
 
 
@@ -219,8 +370,6 @@ def _parse_group_role_map() -> dict[str, str]:
     mapping: dict[str, str] = {}
     for item in AUTH0_GROUP_ROLE_MAP.split(","):
         item = item.strip()
-        if not item:
-            continue
         if ":" in item:
             group, role = item.split(":", 1)
             mapping[group.strip()] = role.strip()
@@ -235,46 +384,35 @@ def _role_from_groups(groups: list[str]) -> Optional[str]:
     return None
 
 
-def _enforce_rate_limit(client_id: str) -> None:
-    now = time.time()
-    with _rate_limit_lock:
-        timestamps = _rate_limit.get(client_id, [])
-        timestamps = [ts for ts in timestamps if now - ts < _rate_limit_window]
-        if len(timestamps) >= _rate_limit_max:
-            raise HTTPException(status_code=429, detail="Rate limit exceeded.")
-        timestamps.append(now)
-        _rate_limit[client_id] = timestamps
+# ---------------------------------------------------------------------------
+# Tool filtering (allowlist/denylist — role access handled by ToolDispatcher.get_all_tools)
+# ---------------------------------------------------------------------------
 
-
-def _is_tool_allowed(role: str, tool_name: str) -> bool:
-    role = role.lower()
-    if role == "admin":
-        return True
-    diagnostic_tools = {
-        "get_top_flapping_links",
-        "get_interface_health",
-        "get_interface_status",
-        "get_interface_counters",
-        "get_bgp_neighbor_status",
-        "get_ospf_neighbors",
-        "get_isis_neighbors",
-        "get_cpu_memory",
-        "get_chassis_health",
-        "get_link_health",
-        "get_isis_health",
-        "get_route_lookup",
-        "get_bgp_route",
-        "get_acl_hits",
-        "get_mtu_info",
-        "get_ping",
-        "get_traceroute",
+def _is_tool_allowed(tool_name: str) -> bool:
+    denylist = {
+        item.strip()
+        for item in get_setting("TOOL_DENYLIST", "").split(",")
+        if item.strip()
     }
-    ticket_tools = {"create_ticket", "close_ticket", "add_ticket_comment"}
-    if role == "noc":
-        return tool_name in diagnostic_tools
-    if role == "noc-ticket":
-        return tool_name in diagnostic_tools.union(ticket_tools)
-    return False
+    allowlist = {
+        item.strip()
+        for item in get_setting("TOOL_ALLOWLIST", "").split(",")
+        if item.strip()
+    }
+    if tool_name in denylist:
+        return False
+    if allowlist and tool_name not in allowlist:
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Memory (conversation history)
+# ---------------------------------------------------------------------------
+
+_memory_lock = threading.Lock()
+_memory_limit = 12
+_memory_db_path = "memory.db"
 
 
 def _init_memory_db() -> None:
@@ -292,6 +430,11 @@ def _init_memory_db() -> None:
         )
 
 
+def _build_device_inventory_summary() -> str:
+    """Return a compact vendor→device list for the system prompt (from registry)."""
+    return device_inventory_summary()
+
+
 def _load_memory(user: str) -> list[dict[str, str]]:
     with sqlite3.connect(_memory_db_path) as conn:
         rows = conn.execute(
@@ -304,11 +447,14 @@ def _load_memory(user: str) -> list[dict[str, str]]:
 
 def _save_memory(user: str, turns: list[dict[str, str]]) -> None:
     now = time.time()
+    retention_days = get_setting_int("CHAT_RETENTION_DAYS", 14)
+    cutoff = now - retention_days * 86400
     with sqlite3.connect(_memory_db_path) as conn:
         conn.executemany(
             "INSERT INTO memory (user, role, content, created_at) VALUES (?, ?, ?, ?)",
             [(user, t["role"], t["content"], now) for t in turns],
         )
+        conn.execute("DELETE FROM memory WHERE created_at < ?", (cutoff,))
         conn.execute(
             """
             DELETE FROM memory
@@ -318,6 +464,15 @@ def _save_memory(user: str, turns: list[dict[str, str]]) -> None:
             """,
             (user, user, _memory_limit * 2),
         )
+
+
+# ---------------------------------------------------------------------------
+# Alerts DB
+# ---------------------------------------------------------------------------
+
+_alert_db_path = "alerts.db"
+_inventory_webhook_lock = threading.Lock()
+_inventory_webhook_last_reload = 0.0
 
 
 def _init_alerts_db() -> None:
@@ -337,19 +492,37 @@ def _init_alerts_db() -> None:
 
 def _save_alert(channel: str, source: str, payload: dict[str, Any]) -> None:
     now = time.time()
+    retention_days = get_setting_int("ALERT_RETENTION_DAYS", 7)
+    cutoff = now - retention_days * 86400
     with sqlite3.connect(_alert_db_path) as conn:
         conn.execute(
             "INSERT INTO alerts (channel, source, payload, created_at) VALUES (?, ?, ?, ?)",
             (channel, source, json.dumps(payload), now),
         )
+        conn.execute("DELETE FROM alerts WHERE created_at < ?", (cutoff,))
 
 
-def _get_latest_alert(channel: str) -> Optional[dict[str, Any]]:
+def _get_latest_alert(
+    channel: str,
+    source: Optional[str] = None,
+    exclude_source: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
     with sqlite3.connect(_alert_db_path) as conn:
-        row = conn.execute(
-            "SELECT payload FROM alerts WHERE channel = ? ORDER BY id DESC LIMIT 1",
-            (channel,),
-        ).fetchone()
+        if source:
+            row = conn.execute(
+                "SELECT payload FROM alerts WHERE channel = ? AND source = ? ORDER BY id DESC LIMIT 1",
+                (channel, source),
+            ).fetchone()
+        elif exclude_source:
+            row = conn.execute(
+                "SELECT payload FROM alerts WHERE channel = ? AND source != ? ORDER BY id DESC LIMIT 1",
+                (channel, exclude_source),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT payload FROM alerts WHERE channel = ? ORDER BY id DESC LIMIT 1",
+                (channel,),
+            ).fetchone()
     if row and row[0]:
         try:
             return json.loads(row[0])
@@ -358,31 +531,26 @@ def _get_latest_alert(channel: str) -> Optional[dict[str, Any]]:
     return None
 
 
-def _post_slack_message(channel: str, text: str) -> Optional[str]:
-    if not SLACK_BOT_TOKEN:
-        return "SLACK_BOT_TOKEN not configured."
-    try:
-        import httpx
-
-        resp = httpx.post(
-            "https://slack.com/api/chat.postMessage",
-            headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
-            json={"channel": channel, "text": text},
-            timeout=10,
-        )
-        data = resp.json()
-        if not data.get("ok"):
-            return data.get("error", "Slack API error.")
-    except Exception as exc:
-        return str(exc)
+def _get_latest_analysis(channel: str) -> Optional[str]:
+    payload = _get_latest_alert(channel, source="analysis")
+    if payload and isinstance(payload, dict):
+        return payload.get("analysis") or payload.get("summary")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Misc helpers
+# ---------------------------------------------------------------------------
+
+def _post_slack_message(channel: str, text: str) -> Optional[str]:
+    adapter = get_slack_adapter()
+    return adapter.send_message(channel, text)
 
 
 def _format_alert_context(alert: dict[str, Any]) -> str:
     parts = []
-    text = alert.get("text")
-    if text:
-        parts.append(text)
+    if alert.get("text"):
+        parts.append(alert["text"])
     if alert.get("device"):
         parts.append(f"device={alert['device']}")
     if alert.get("interface"):
@@ -392,18 +560,27 @@ def _format_alert_context(alert: dict[str, Any]) -> str:
     return " | ".join(parts) if parts else json.dumps(alert)
 
 
-def _ticket_from_alert(alert: dict[str, Any]) -> dict[str, str]:
-    summary = f"Alert: {alert.get('text', 'NetCopilot alert')}"
+def _ticket_from_alert(alert: dict[str, Any], analysis: Optional[str] = None) -> dict[str, str]:
+    base_text = alert.get("text", "NetCopilot alert")
+    device = alert.get("device")
+    interface = alert.get("interface")
+    summary_parts = [p for p in [base_text, f"on {device}" if device else None, interface] if p]
+    summary = " ".join(summary_parts).strip()
+
     details = []
-    if alert.get("device"):
-        details.append(f"Device: {alert['device']}")
-    if alert.get("interface"):
-        details.append(f"Interface: {alert['interface']}")
+    if device:
+        details.append(f"Device: {device}")
+    if interface:
+        details.append(f"Interface: {interface}")
     if alert.get("severity"):
         details.append(f"Severity: {alert['severity']}")
+
     description = summary
     if details:
-        description = summary + "\n\n" + "\n".join(details)
+        description += "\n\n" + "\n".join(details)
+    if analysis:
+        description += "\n\nInvestigation summary:\n" + analysis
+
     return {
         "ticket_type": JIRA_DEFAULT_ISSUE_TYPE,
         "summary": summary,
@@ -412,7 +589,94 @@ def _ticket_from_alert(alert: dict[str, Any]) -> dict[str, str]:
         "priority": JIRA_DEFAULT_PRIORITY,
     }
 
-# ---------- REQUEST MODEL ----------
+
+def _get_redaction_fields() -> set[str]:
+    base_fields = {"password", "pass", "secret", "token", "api_key", "authorization", "session_secret"}
+    extra = get_setting("LOG_REDACTION_FIELDS", "")
+    if extra:
+        for item in extra.split(","):
+            item = item.strip().lower()
+            if item:
+                base_fields.add(item)
+    return base_fields
+
+
+def _redact_payload(payload: Any) -> Any:
+    if not get_setting_bool("LOG_REDACTION_ENABLED", True):
+        return payload
+    fields = _get_redaction_fields()
+    if isinstance(payload, dict):
+        return {
+            k: "***" if str(k).lower() in fields else _redact_payload(v)
+            for k, v in payload.items()
+        }
+    if isinstance(payload, list):
+        return [_redact_payload(item) for item in payload]
+    return payload
+
+
+def _audit_log(payload: dict[str, Any]) -> None:
+    audit_logger.info(json.dumps(_redact_payload(payload), ensure_ascii=True))
+
+
+def _is_config_request(message: str) -> bool:
+    normalized = message.lower()
+    if normalized.strip().startswith(("show ", "display ")):
+        return False
+    if "show config" in normalized or "show configuration" in normalized:
+        return False
+    if "display configuration" in normalized:
+        return False
+    pattern = re.compile(
+        r"\b(configure|configuration|apply|commit|rollback|shutdown|no shutdown|enable|disable|"
+        r"set\s+|delete\s+|replace\s+|edit\s+|change\s+|modify\s+|update\s+)\b"
+    )
+    return bool(pattern.search(normalized))
+
+
+def _get_llm_settings() -> dict[str, str]:
+    provider = get_setting("LLM_PROVIDER", "openai").lower()
+    return {
+        "provider": provider,
+        "openai_api_key": get_setting("OPENAI_API_KEY", ""),
+        "openai_model": get_setting("OPENAI_MODEL", "gpt-4.1-mini"),
+        "anthropic_api_key": get_setting("ANTHROPIC_API_KEY", ""),
+        "anthropic_model": get_setting("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+        "local_base_url": get_setting("LOCAL_LLM_BASE_URL", ""),
+        "local_api_key": get_setting("LOCAL_LLM_API_KEY", "local"),
+        "local_model": get_setting("LOCAL_LLM_MODEL", "llama3.1"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# HTTP middleware
+# ---------------------------------------------------------------------------
+
+@app.middleware("http")
+async def audit_http_requests(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration_ms = int((time.time() - start) * 1000)
+    user = None
+    if hasattr(request, "session") and request.session:
+        user = request.session.get("user", {}).get("email")
+    _audit_log(
+        {
+            "event": "http_request",
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "duration_ms": duration_ms,
+            "user": user,
+        }
+    )
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Request models
+# ---------------------------------------------------------------------------
+
 class ChatRequest(BaseModel):
     message: str
     user: str = "unknown"
@@ -434,19 +698,151 @@ class AlertIngestRequest(BaseModel):
     severity: Optional[str] = None
 
 
-# ---------- MAIN /chat ENDPOINT ----------
-def _run_chat(message: str, user: str, role: str) -> dict:
+# ---------------------------------------------------------------------------
+# Core chat loop (async — MCP tool calls are awaited)
+# ---------------------------------------------------------------------------
+
+async def _agentic_loop(
+    request_id: str,
+    messages: list,
+    tools: list,
+    model: str,
+    user: str,
+    role: str,
+):
+    """
+    Async generator — the core agentic tool loop.
+
+    Each iteration:
+      1. Call the LLM.
+      2. If no tool calls → yield {"type": "reply", "content": ...} and return.
+      3. If tool calls → run them ALL in parallel, append results, repeat.
+
+    Yields event dicts consumed by both _run_chat (blocking) and /chat/stream (SSE).
+      {"type": "tool_start", "name": str, "args": dict}
+      {"type": "tool_end",   "name": str, "ms": int}
+      {"type": "reply",      "content": str}
+      {"type": "error",      "text": str}
+    """
+    MAX_TOOL_TURNS = 10
+
+    llm_adapter = get_llm_adapter()
+    if not llm_adapter:
+        yield {"type": "error", "text": "LLM not configured."}
+        return
+
+    async def _exec_one(tc) -> tuple[dict, dict]:
+        """Execute one tool call; returns (end_event, tool_result_message)."""
+        name = tc.function.name
+        try:
+            args = json.loads(tc.function.arguments)
+        except (json.JSONDecodeError, ValueError):
+            args = {}
+
+        tool_start = time.time()
+        logger.info("[request %s] tool_start %s args=%s", request_id, name, args)
+        with _metrics_lock:
+            _metrics["tool_calls_total"] += 1
+            _metrics["tool_counts"][name] = _metrics["tool_counts"].get(name, 0) + 1
+
+        if not _is_tool_allowed(name):
+            result: Any = {"error": f"Tool '{name}' is blocked by server policy."}
+        elif not _dispatcher:
+            result = {"error": "Dispatcher not initialised."}
+        else:
+            result = await _dispatcher.call_tool(name, args)
+
+        tool_elapsed_ms = int((time.time() - tool_start) * 1000)
+        logger.info("[request %s] tool_end %s ms=%d", request_id, name, tool_elapsed_ms)
+        _audit_log(
+            {
+                "event": "tool_call",
+                "request_id": request_id,
+                "name": name,
+                "user": user,
+                "role": role,
+                "ms": tool_elapsed_ms,
+                "error": isinstance(result, dict) and "error" in result,
+            }
+        )
+        if isinstance(result, dict) and "error" in result:
+            with _metrics_lock:
+                _metrics["tool_errors_total"] += 1
+
+        end_event = {"type": "tool_end", "name": name, "ms": tool_elapsed_ms}
+        tool_msg = {
+            "role": "tool",
+            "tool_call_id": tc.id,
+            "name": name,
+            "content": json.dumps(result),
+        }
+        return end_event, tool_msg
+
+    for _turn in range(MAX_TOOL_TURNS):
+        try:
+            response = llm_adapter.chat(
+                model=model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+            )
+        except Exception as exc:
+            logger.exception("[request %s] LLM request failed: %s", request_id, exc)
+            yield {"type": "error", "text": "LLM request failed. Please retry later."}
+            return
+
+        msg = response.choices[0].message
+        if not msg.tool_calls:
+            yield {"type": "reply", "content": msg.content or ""}
+            return
+
+        # Announce all tool calls before executing
+        messages.append(msg)
+        for tc in msg.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments)
+            except (json.JSONDecodeError, ValueError):
+                args = {}
+            yield {"type": "tool_start", "name": tc.function.name, "args": args}
+
+        # Execute tool calls in parallel, capped at 5 concurrent device calls
+        _sem = asyncio.Semaphore(5)
+
+        async def _exec_bounded(tc):
+            async with _sem:
+                return await _exec_one(tc)
+
+        pairs = await asyncio.gather(*[_exec_bounded(tc) for tc in msg.tool_calls])
+        for end_event, tool_msg in pairs:
+            yield end_event
+            messages.append(tool_msg)
+
+    yield {"type": "reply", "content": "Reached maximum reasoning depth. Please rephrase your question."}
+
+
+async def _run_chat(message: str, user: str, role: str) -> dict:
     request_id = str(uuid.uuid4())
     start_time = time.time()
     logger.info("[request %s] /chat start user=%s role=%s", request_id, user, role)
-    audit_logger.info("request_id=%s action=chat user=%s role=%s", request_id, user, role)
+    _audit_log({"event": "chat_start", "request_id": request_id, "user": user, "role": role})
 
-    if LLM_PROVIDER == "openai" and not OPENAI_API_KEY:
-        logger.warning("[request %s] missing OPENAI_API_KEY", request_id)
-        return {"reply": "OPENAI_API_KEY is missing."}
-    if LLM_PROVIDER == "local" and not LOCAL_LLM_BASE_URL:
-        logger.warning("[request %s] missing LOCAL_LLM_BASE_URL", request_id)
-        return {"reply": "LOCAL_LLM_BASE_URL is missing."}
+    if _is_config_request(message):
+        return {
+            "request_id": request_id,
+            "reply": (
+                "NetCopilot is in read-only mode and cannot provide configuration commands. "
+                "If you want, I can open a change ticket instead."
+            ),
+        }
+
+    llm_settings = _get_llm_settings()
+    provider = llm_settings["provider"]
+    if provider == "openai" and not llm_settings["openai_api_key"]:
+        return {"request_id": request_id, "reply": "OPENAI_API_KEY is missing."}
+    if provider == "anthropic" and not llm_settings["anthropic_api_key"]:
+        return {"request_id": request_id, "reply": "ANTHROPIC_API_KEY is missing."}
+    if provider == "local" and not llm_settings["local_base_url"]:
+        return {"request_id": request_id, "reply": "LOCAL_LLM_BASE_URL is missing."}
 
     with _metrics_lock:
         _metrics["requests_total"] += 1
@@ -454,199 +850,83 @@ def _run_chat(message: str, user: str, role: str) -> dict:
     with _memory_lock:
         history = _load_memory(user)
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history, {"role": "user", "content": message}]
+    # Role-filtered tool list from MCP servers
+    tools = _dispatcher.get_all_tools(role) if _dispatcher else []
 
-    try:
-        model = LOCAL_LLM_MODEL if LLM_PROVIDER == "local" else OPENAI_MODEL
-        first = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=TOOLS,
-            tool_choice="auto",
-        )
-    except Exception as exc:
-        logger.exception("[request %s] OpenAI request failed: %s", request_id, exc)
-        return {"request_id": request_id, "reply": "LLM request failed. Please retry later."}
+    playbook_summary = format_playbook_summary()
+    device_inventory = _build_device_inventory_summary()
+    system_prompt = build_system_prompt(playbook_summary, device_inventory)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        *history,
+        {"role": "user", "content": message},
+    ]
 
-    msg = first.choices[0].message
+    if provider == "local":
+        model = llm_settings["local_model"]
+    elif provider == "anthropic":
+        model = llm_settings["anthropic_model"]
+    else:
+        model = llm_settings["openai_model"]
 
-    # If LLM wants to call a tool
-    if msg.tool_calls:
-        tool_results: dict[str, Any] = {}
-        messages.append(msg)
-        for tc in msg.tool_calls:
-            name = tc.function.name
-            args = json.loads(tc.function.arguments)
-            tool_start = time.time()
-            logger.info("[request %s] tool_start %s args=%s", request_id, name, args)
-            with _metrics_lock:
-                _metrics["tool_calls_total"] += 1
-                _metrics["tool_counts"][name] = _metrics["tool_counts"].get(name, 0) + 1
+    reply = ""
+    async for event in _agentic_loop(request_id, messages, tools, model, user, role):
+        if event["type"] == "reply":
+            reply = event["content"]
+        elif event["type"] == "error":
+            return {"request_id": request_id, "reply": event["text"]}
 
-            if not _is_tool_allowed(role, name):
-                result = {"error": f"Role '{role}' not permitted to run '{name}'."}
-            elif name == "get_top_flapping_links":
-                result = get_top_flapping_links(
-                    args.get("limit", 10),
-                    args.get("since_hours", 24),
-                )
-
-            elif name == "get_interface_health":
-                result = get_interface_health(
-                    args["device"],
-                    args["interface"],
-                )
-            elif name == "get_interface_status":
-                result = get_interface_status(args["device"])
-            elif name == "get_interface_counters":
-                result = get_interface_counters(
-                    args["device"],
-                    args["interface"],
-                    args.get("window_minutes", 60),
-                )
-            elif name == "create_ticket":
-                result = create_ticket(
-                    args["ticket_type"],
-                    args["summary"],
-                    args["description"],
-                    args["team"],
-                    args["priority"],
-                )
-            elif name == "close_ticket":
-                result = close_ticket(
-                    args["issue_key"],
-                    args.get("transition_name", "Done"),
-                )
-            elif name == "add_ticket_comment":
-                result = add_ticket_comment(
-                    args["issue_key"],
-                    args["comment"],
-                )
-            elif name == "get_bgp_neighbor_status":
-                result = get_bgp_neighbor_status(args["device"], args["neighbor"])
-            elif name == "get_ospf_neighbors":
-                result = get_ospf_neighbors(args["device"])
-            elif name == "get_isis_neighbors":
-                result = get_isis_neighbors(args["device"])
-            elif name == "get_cpu_memory":
-                result = get_cpu_memory(args["device"])
-            elif name == "get_chassis_health":
-                result = get_chassis_health(args["device"])
-            elif name == "get_link_health":
-                result = get_link_health(args["device"], args["interface"])
-            elif name == "get_isis_health":
-                result = get_isis_health(args["device"], args["interface"])
-            elif name == "get_route_lookup":
-                result = get_route_lookup(args["device"], args["prefix"])
-            elif name == "get_bgp_route":
-                result = get_bgp_route(args["device"], args["prefix"])
-            elif name == "get_acl_hits":
-                result = get_acl_hits(args["device"], args["acl_name"])
-            elif name == "get_mtu_info":
-                result = get_mtu_info(args["device"], args["interface"])
-            elif name == "get_ping":
-                result = get_ping(args["device"], args["destination"], args.get("count", 5))
-            elif name == "get_traceroute":
-                result = get_traceroute(args["device"], args["destination"])
-            else:
-                result = {"error": f"Unknown tool '{name}'"}
-
-            tool_results[name] = result
-            tool_elapsed_ms = int((time.time() - tool_start) * 1000)
-            logger.info("[request %s] tool_end %s ms=%s", request_id, name, tool_elapsed_ms)
-            audit_logger.info(
-                "request_id=%s action=tool name=%s user=%s role=%s ms=%s error=%s",
-                request_id,
-                name,
-                user,
-                role,
-                tool_elapsed_ms,
-                "error" in result,
-            )
-            if isinstance(result, dict) and "error" in result:
-                with _metrics_lock:
-                    _metrics["tool_errors_total"] += 1
-
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "name": name,
-                    "content": json.dumps(result),
-                }
-            )
-
-        if len(msg.tool_calls) == 1 and msg.tool_calls[0].function.name == "get_link_health":
-            reply = _format_link_health(tool_results.get("get_link_health", {}))
-            with _memory_lock:
-                _save_memory(
-                    user,
-                    [
-                        {"role": "user", "content": message},
-                        {"role": "assistant", "content": reply},
-                    ],
-                )
-            return {"request_id": request_id, "reply": reply}
-
-        try:
-            final = client.chat.completions.create(
-                model=model,
-                messages=messages,
-            )
-        except Exception as exc:
-            logger.exception("[request %s] OpenAI request failed: %s", request_id, exc)
-            return {"request_id": request_id, "reply": "LLM request failed. Please retry later."}
-        total_ms = int((time.time() - start_time) * 1000)
-        logger.info("[request %s] /chat end ms=%s", request_id, total_ms)
-        reply = final.choices[0].message.content
-        with _memory_lock:
-            _save_memory(
-                user,
-                [
-                    {"role": "user", "content": message},
-                    {"role": "assistant", "content": reply},
-                ],
-            )
-        return {"request_id": request_id, "reply": reply}
-
-    # If no tool call
     total_ms = int((time.time() - start_time) * 1000)
-    logger.info("[request %s] /chat end ms=%s (no tool)", request_id, total_ms)
-    reply = msg.content
+    logger.info("[request %s] /chat end ms=%d", request_id, total_ms)
+
+    # Collect tool results so they're available in future turns for ticket creation, etc.
+    tool_findings: list[str] = []
+    for m in messages:
+        if isinstance(m, dict) and m.get("role") == "tool":
+            name = m.get("name", "tool")
+            content = m.get("content", "")
+            tool_findings.append(f"[{name}]: {content}")
+
+    if tool_findings:
+        enriched_reply = (
+            "Investigation findings (tool outputs):\n"
+            + "\n".join(tool_findings)
+            + "\n\nAssistant summary: "
+            + reply
+        )
+    else:
+        enriched_reply = reply
+
     with _memory_lock:
         _save_memory(
             user,
             [
                 {"role": "user", "content": message},
-                {"role": "assistant", "content": reply},
+                {"role": "assistant", "content": enriched_reply},
             ],
         )
     return {"request_id": request_id, "reply": reply}
 
 
+# ---------------------------------------------------------------------------
+# Slack helpers
+# ---------------------------------------------------------------------------
+
 def _parse_ticket_command(text: str) -> Optional[dict]:
     normalized = text.strip()
     lower = normalized.lower()
-    prefix = None
-    if lower.startswith("ticket "):
-        prefix = "ticket"
-    elif lower.startswith("create ticket "):
-        prefix = "create ticket"
-    elif "ticket" in lower:
-        prefix = "ticket"
-    if not prefix:
+    if "ticket" not in lower:
         return None
-
-    remainder = normalized
     if lower.startswith("ticket "):
         remainder = normalized[len("ticket"):].strip()
     elif lower.startswith("create ticket "):
         remainder = normalized[len("create ticket"):].strip()
     else:
         remainder = re.sub(r"(?i)ticket", "", normalized).strip()
+
     if "|" in remainder:
-        parts = [part.strip() for part in remainder.split("|")]
-        summary = parts[0] if len(parts) > 0 and parts[0] else "NetCopilot ticket"
+        parts = [p.strip() for p in remainder.split("|")]
+        summary = parts[0] or "NetCopilot ticket"
         description = parts[1] if len(parts) > 1 and parts[1] else summary
         team = parts[2] if len(parts) > 2 and parts[2] else JIRA_DEFAULT_TEAM
         priority = parts[3] if len(parts) > 3 and parts[3] else JIRA_DEFAULT_PRIORITY
@@ -667,164 +947,126 @@ def _parse_ticket_command(text: str) -> Optional[dict]:
     }
 
 
-def _settings_snapshot() -> list[dict[str, Any]]:
-    schema = []
-    for entry in _SETTINGS_SCHEMA:
-        key = entry["key"]
-        raw_value = get_setting(key, "")
-        is_secret = bool(entry.get("secret"))
-        schema.append(
-            {
-                "key": key,
-                "label": entry.get("label", key),
-                "category": entry.get("category", "General"),
-                "secret": is_secret,
-                "has_value": bool(raw_value),
-                "value": "" if is_secret else raw_value,
-                "restart_required": True,
-            }
-        )
-    return schema
-
-
-def _mask_custom_settings(values: dict[str, str]) -> dict[str, str]:
-    masked: dict[str, str] = {}
-    for key, value in values.items():
-        if re.search(r"(secret|token|pass|key)", key, re.IGNORECASE):
-            masked[key] = "********"
-        else:
-            masked[key] = value
-    return masked
-
-
-def _format_link_health(result: dict[str, Any]) -> str:
-    local = result.get("local", {})
-    neighbor = result.get("neighbor", {})
-    remote = result.get("remote", {})
-
-    local_parsed = local.get("parsed_interface") or {}
-    local_admin = local_parsed.get("admin_status") or local_parsed.get("admin_status_raw", "unknown")
-    local_oper = local_parsed.get("oper_status") or local_parsed.get("oper_status_raw", "unknown")
-    last_flap = local_parsed.get("last_flapped") or local_parsed.get("last_link_flapped")
-    alarms = local_parsed.get("active_alarms")
-    defects = local_parsed.get("active_defects")
-    input_errors = local_parsed.get("input_errors") if "input_errors" in local_parsed else None
-    output_errors = local_parsed.get("output_errors") if "output_errors" in local_parsed else None
-    crc_errors = local_parsed.get("crc_errors") if "crc_errors" in local_parsed else None
-
-    lines = [
-        f"Link health for {result.get('device')} {result.get('interface')}:",
-        f"- Local status: admin={local_admin}, oper={local_oper}",
-    ]
-    if last_flap:
-        lines.append(f"- Last flap: {last_flap}")
-    if alarms:
-        lines.append(f"- Active alarms: {alarms}")
-    if defects:
-        lines.append(f"- Active defects: {defects}")
-    lines.append(
-        f"- Errors: input={input_errors or 0}, output={output_errors or 0}, crc={crc_errors or 0}"
-    )
-
-    local_optics = result.get("local_optics", {}).get("parsed_optics")
-    if local_optics:
-        lines.append(
-            f"- Optics (local): rx={local_optics.get('rx_power_dbm')} dBm, "
-            f"tx={local_optics.get('tx_power_dbm')} dBm"
-        )
-
-    if neighbor.get("neighbor_device") or neighbor.get("neighbor_interface"):
-        lines.append(
-            f"- LLDP neighbor: {neighbor.get('neighbor_device', 'unknown')} "
-            f"{neighbor.get('neighbor_interface', '')}".strip()
-        )
-    else:
-        lines.append("- LLDP neighbor: not detected")
-
-    if "error" in remote:
-        lines.append(f"- Remote check: {remote['error']}")
-    else:
-        remote_parsed = remote.get("parsed_interface") or {}
-        remote_admin = remote_parsed.get("admin_status") or remote_parsed.get("admin_status_raw", "unknown")
-        remote_oper = remote_parsed.get("oper_status") or remote_parsed.get("oper_status_raw", "unknown")
-        lines.append(f"- Remote status: admin={remote_admin}, oper={remote_oper}")
-        remote_errors = [
-            f"in={remote_parsed.get('input_errors', 0)}",
-            f"out={remote_parsed.get('output_errors', 0)}",
-            f"crc={remote_parsed.get('crc_errors', 0)}",
-        ]
-        lines.append(f"- Errors (remote): {', '.join(remote_errors)}")
-
-        remote_optics = result.get("remote_optics", {}).get("parsed_optics")
-        if remote_optics:
-            lines.append(
-                f"- Optics (remote): rx={remote_optics.get('rx_power_dbm')} dBm, "
-                f"tx={remote_optics.get('tx_power_dbm')} dBm"
-            )
-
-    local_ok = str(local_admin).lower().startswith("en") or str(local_admin).lower() == "up"
-    local_oper_up = str(local_oper).lower() == "up"
-    remote_admin_ok = True
-    remote_oper_up = True
-    if "error" in remote:
-        remote_admin_ok = False
-        remote_oper_up = False
-    else:
-        remote_admin_ok = str(remote_admin).lower().startswith("en") or str(remote_admin).lower() == "up"
-        remote_oper_up = str(remote_oper).lower() == "up"
-
-    if local_ok and local_oper_up and remote_admin_ok and remote_oper_up:
-        diagnosis = "Diagnosis: Link is healthy on both ends. No immediate action required."
-        next_steps = "Next steps: Continue monitoring. If alerts persist, verify the monitoring source."
-    elif local_ok and not local_oper_up:
-        diagnosis = "Diagnosis: Local interface is admin up but operationally down (possible physical issue or remote side down)."
-        next_steps = "Next steps: Check optics/cabling, verify remote interface state, and review recent changes."
-    elif not local_ok:
-        diagnosis = "Diagnosis: Local interface appears administratively down."
-        next_steps = "Next steps: Confirm if a shutdown was intentional; re-enable if appropriate."
-    else:
-        diagnosis = "Diagnosis: Link status inconsistent; further checks needed."
-        next_steps = "Next steps: Collect detailed interface stats and verify LLDP neighbor data."
-
-    lines.append(diagnosis)
-    lines.append(next_steps)
-    lines.append("Checklist: Status → Evidence → Likely cause → Next steps")
-    return "\n".join(lines)
-
+# ---------------------------------------------------------------------------
+# HTTP endpoints
+# ---------------------------------------------------------------------------
 
 @app.post("/chat")
 async def chat(req: ChatRequest, request: Request):
     _enforce_rate_limit(request.client.host if request.client else "unknown")
     role = _get_role_from_request(request)
-    return _run_chat(req.message, req.user, role)
+    return await _run_chat(req.message, req.user, role)
+
+
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest, request: Request):
+    """
+    Streaming version of /chat.
+    Returns text/event-stream with one JSON object per line:
+      data: {"type": "tool_start", "name": "cisco_get_cpu_memory", "args": {...}}
+      data: {"type": "tool_end",   "name": "cisco_get_cpu_memory", "ms": 412}
+      data: {"type": "reply",      "content": "CPU is 23%..."}
+      data: {"type": "done"}
+    """
+    _enforce_rate_limit(request.client.host if request.client else "unknown")
+    role = _get_role_from_request(request)
+
+    llm_settings = _get_llm_settings()
+    provider = llm_settings["provider"]
+    if provider == "openai" and not llm_settings["openai_api_key"]:
+        async def _err():
+            yield f'data: {json.dumps({"type": "error", "text": "OPENAI_API_KEY is missing."})}\n\n'
+            yield f'data: {json.dumps({"type": "done"})}\n\n'
+        return StreamingResponse(_err(), media_type="text/event-stream")
+    if provider == "anthropic" and not llm_settings["anthropic_api_key"]:
+        async def _err():
+            yield f'data: {json.dumps({"type": "error", "text": "ANTHROPIC_API_KEY is missing."})}\n\n'
+            yield f'data: {json.dumps({"type": "done"})}\n\n'
+        return StreamingResponse(_err(), media_type="text/event-stream")
+
+    if provider == "local":
+        model = llm_settings["local_model"]
+    elif provider == "anthropic":
+        model = llm_settings["anthropic_model"]
+    else:
+        model = llm_settings["openai_model"]
+
+    request_id = str(uuid.uuid4())
+    with _memory_lock:
+        history = _load_memory(req.user)
+
+    tools = _dispatcher.get_all_tools(role) if _dispatcher else []
+    system_prompt = build_system_prompt(
+        format_playbook_summary(), _build_device_inventory_summary()
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        *history,
+        {"role": "user", "content": req.message},
+    ]
+
+    async def event_generator():
+        reply = ""
+        async for event in _agentic_loop(request_id, messages, tools, model, req.user, role):
+            if event["type"] == "reply":
+                reply = event["content"]
+            yield f"data: {json.dumps(event)}\n\n"
+        yield f'data: {json.dumps({"type": "done"})}\n\n'
+        if reply:
+            tool_findings: list[str] = []
+            for m in messages:
+                if isinstance(m, dict) and m.get("role") == "tool":
+                    tool_findings.append(f"[{m.get('name', 'tool')}]: {m.get('content', '')}")
+            if tool_findings:
+                enriched_reply = (
+                    "Investigation findings (tool outputs):\n"
+                    + "\n".join(tool_findings)
+                    + "\n\nAssistant summary: "
+                    + reply
+                )
+            else:
+                enriched_reply = reply
+            with _memory_lock:
+                _save_memory(
+                    req.user,
+                    [
+                        {"role": "user", "content": req.message},
+                        {"role": "assistant", "content": enriched_reply},
+                    ],
+                )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/alerts/ingest")
 async def ingest_alert(req: AlertIngestRequest, request: Request):
+    _enforce_rate_limit(request.client.host if request.client else "alert-ingest")
     token = request.headers.get("X-Alert-Token", "")
     if ALERT_INGEST_TOKEN and token != ALERT_INGEST_TOKEN:
         raise HTTPException(status_code=403, detail="Invalid alert ingest token.")
 
     channel = req.channel or SLACK_ALERT_CHANNEL or "default"
-    payload = req.model_dump()
-    _save_alert(channel, req.source, payload)
+    _save_alert(channel, req.source, req.model_dump())
 
-    message = req.text
-    if req.device or req.interface or req.severity:
-        details = " ".join(
+    details = " ".join(
+        filter(
+            None,
             [
                 f"device={req.device}" if req.device else "",
                 f"interface={req.interface}" if req.interface else "",
                 f"severity={req.severity}" if req.severity else "",
-            ]
-        ).strip()
-        if details:
-            message = f"{req.text} ({details})"
-    message = f"ALERT: {message}\nRun `/netcopilot investigate` to analyze."
+            ],
+        )
+    ).strip()
+    slack_msg = f"ALERT: {req.text}{' (' + details + ')' if details else ''}\nRun `/netcopilot investigate` to analyze."
 
     slack_error = None
     if channel != "default":
-        slack_error = _post_slack_message(channel, message)
+        slack_error = _post_slack_message(channel, slack_msg)
     return {"status": "ok", "channel": channel, "slack_error": slack_error}
 
 
@@ -838,14 +1080,12 @@ async def teams_webhook(req: TeamsWebhookRequest):
         user = req.from_.get("name") or req.from_.get("id") or user
     elif isinstance(req.from_, str):
         user = req.from_
-    result = _run_chat(req.text, user, TEAMS_ROLE)
+    result = await _run_chat(req.text, user, TEAMS_ROLE)
     return {"type": "message", "text": result["reply"]}
 
 
 @app.post("/slack/command")
-async def slack_command(
-    request: Request,
-):
+async def slack_command(request: Request):
     _enforce_rate_limit("slack")
     raw_body = await request.body()
     timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
@@ -854,7 +1094,7 @@ async def slack_command(
     if SLACK_SIGNING_SECRET:
         if not timestamp.isdigit():
             raise HTTPException(status_code=403, detail="Invalid Slack signature.")
-        if abs(int(time.time()) - int(timestamp)) > 60 * 5:
+        if abs(int(time.time()) - int(timestamp)) > 300:
             raise HTTPException(status_code=403, detail="Slack request expired.")
         base = f"v0:{timestamp}:{raw_body.decode('utf-8')}"
         digest = hmac.new(
@@ -862,8 +1102,7 @@ async def slack_command(
             base.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
-        expected = f"v0={digest}"
-        if not hmac.compare_digest(expected, signature):
+        if not hmac.compare_digest(f"v0={digest}", signature):
             raise HTTPException(status_code=403, detail="Invalid Slack signature.")
 
     form = parse_qs(raw_body.decode("utf-8"))
@@ -876,59 +1115,66 @@ async def slack_command(
 
     if SLACK_VERIFICATION_TOKEN and token != SLACK_VERIFICATION_TOKEN and not SLACK_SIGNING_SECRET:
         raise HTTPException(status_code=403, detail="Invalid Slack verification token.")
+
     ticket_payload = _parse_ticket_command(text)
-    if ticket_payload and (
-        ticket_payload.get("summary") == "NetCopilot ticket"
-        or ticket_payload.get("description") == ticket_payload.get("summary")
-    ):
-        alert = _get_latest_alert(channel_id or "default") or (
-            _get_latest_alert(channel_name) if channel_name else None
+    if ticket_payload and ticket_payload.get("summary") == "NetCopilot ticket":
+        channel_key = channel_id or "default"
+        alert = _get_latest_alert(channel_key, exclude_source="analysis") or (
+            _get_latest_alert(channel_name, exclude_source="analysis") if channel_name else None
         )
         if alert:
-            ticket_payload = _ticket_from_alert(alert)
+            analysis = _get_latest_analysis(channel_key or channel_name or "default")
+            ticket_payload = _ticket_from_alert(alert, analysis=analysis)
+
     investigate_text = None
     if text.strip().lower().startswith("investigate"):
         remainder = text.strip()[len("investigate"):].strip()
         if remainder:
             investigate_text = remainder
         else:
-            alert = _get_latest_alert(channel_id or "default")
-            if alert:
-                investigate_text = _format_alert_context(alert)
-            else:
-                if channel_name:
-                    alert = _get_latest_alert(channel_name)
-                if alert:
-                    investigate_text = _format_alert_context(alert)
-                else:
-                    investigate_text = ""
+            channel_key = channel_id or "default"
+            alert = _get_latest_alert(channel_key, exclude_source="analysis")
+            if not alert and channel_name:
+                alert = _get_latest_alert(channel_name, exclude_source="analysis")
+            investigate_text = _format_alert_context(alert) if alert else ""
+
     if response_url:
+        # Background thread for async Slack response
         def _respond_async() -> None:
-            if investigate_text is not None:
-                if not investigate_text.strip():
-                    reply_text = "No recent alert found for this channel."
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            reply_text = "An error occurred."
+            try:
+                if investigate_text is not None:
+                    if not investigate_text.strip():
+                        reply_text = "No recent alert found for this channel."
+                    else:
+                        result = loop.run_until_complete(
+                            _run_chat(f"Investigate alert: {investigate_text}", user_name, SLACK_ROLE)
+                        )
+                        reply_text = result["reply"]
+                        channel_key = channel_id or channel_name or "default"
+                        _save_alert(channel_key, "analysis", {"analysis": reply_text})
+                elif ticket_payload and _dispatcher:
+                    ticket_result = loop.run_until_complete(
+                        _dispatcher.call_tool("jira_create_ticket", ticket_payload)
+                    )
+                    if "error" not in ticket_result:
+                        reply_text = (
+                            f"Ticket created: {ticket_result.get('ticket_id')} "
+                            f"{ticket_result.get('ticket_url', '')}".strip()
+                        )
+                    else:
+                        reply_text = f"Ticket creation failed: {ticket_result.get('error')}"
                 else:
-                    result = _run_chat(f"Investigate alert: {investigate_text}", user_name, SLACK_ROLE)
+                    result = loop.run_until_complete(_run_chat(text, user_name, SLACK_ROLE))
                     reply_text = result["reply"]
-            elif ticket_payload and _is_tool_allowed(SLACK_ROLE, "create_ticket"):
-                result = create_ticket(**ticket_payload)
-                if "error" not in result:
-                    reply_text = (
-                        f"Ticket created: {result.get('ticket_id')} "
-                        f"{result.get('ticket_url', '')}".strip()
-                    )
-                else:
-                    details = result.get("details")
-                    reply_text = (
-                        f"Ticket creation failed: {result.get('error')}"
-                        + (f" | {details}" if details else "")
-                    )
-            else:
-                result = _run_chat(text, user_name, SLACK_ROLE)
-                reply_text = result["reply"]
+            except Exception:
+                logger.exception("Slack async response failed.")
+            finally:
+                loop.close()
             try:
                 import httpx
-
                 with httpx.Client(timeout=10) as client:
                     client.post(
                         response_url,
@@ -938,74 +1184,93 @@ async def slack_command(
                 logger.exception("Slack response_url post failed.")
 
         threading.Thread(target=_respond_async, daemon=True).start()
-        return {
-            "response_type": "ephemeral",
-            "text": "Investigating alert..." if investigate_text else ("Creating ticket..." if ticket_payload else "Working on it..."),
-        }
+        ack = (
+            "Investigating alert..."
+            if investigate_text is not None
+            else ("Creating ticket..." if ticket_payload else "Working on it...")
+        )
+        return {"response_type": "ephemeral", "text": ack}
 
+    # Synchronous path (no response_url)
     if investigate_text is not None:
         if not investigate_text.strip():
             return {"response_type": "ephemeral", "text": "No recent alert found for this channel."}
-        result = _run_chat(f"Investigate alert: {investigate_text}", user_name, SLACK_ROLE)
+        result = await _run_chat(f"Investigate alert: {investigate_text}", user_name, SLACK_ROLE)
         return {"response_type": "in_channel", "text": result["reply"]}
 
-    if ticket_payload and _is_tool_allowed(SLACK_ROLE, "create_ticket"):
-        result = create_ticket(**ticket_payload)
-        if "error" in result:
-            details = result.get("details")
-            message = f"Ticket creation failed: {result['error']}"
-            if details:
-                message = f"{message} | {details}"
-            return {"response_type": "ephemeral", "text": message}
+    if ticket_payload and _dispatcher:
+        ticket_result = await _dispatcher.call_tool("jira_create_ticket", ticket_payload)
+        if "error" in ticket_result:
+            return {
+                "response_type": "ephemeral",
+                "text": f"Ticket creation failed: {ticket_result['error']}",
+            }
         return {
             "response_type": "in_channel",
-            "text": f"Ticket created: {result.get('ticket_id')} {result.get('ticket_url', '')}".strip(),
+            "text": f"Ticket created: {ticket_result.get('ticket_id')} {ticket_result.get('ticket_url', '')}".strip(),
         }
 
-    result = _run_chat(text, user_name, SLACK_ROLE)
+    result = await _run_chat(text, user_name, SLACK_ROLE)
     return {"response_type": "in_channel", "text": result["reply"]}
 
 
-@app.on_event("startup")
-async def startup_summary():
-    _init_memory_db()
-    _init_alerts_db()
-    logger.info(
-        "startup version=%s openai_configured=%s jira_configured=%s devices=%s",
-        APP_VERSION,
-        bool(OPENAI_API_KEY),
-        bool(JIRA_BASE_URL),
-        len(CISCO_DEVICES),
-    )
-
+# ---------------------------------------------------------------------------
+# Health / metrics / version
+# ---------------------------------------------------------------------------
 
 @app.get("/health")
 async def health():
-    ok = bool(OPENAI_API_KEY)
+    from credentials import is_vault_degraded
+    llm_ok = get_llm_adapter() is not None
+    vault_degraded = is_vault_degraded()
+    backends = _dispatcher.server_status() if _dispatcher else []
+    integrations_connected = sum(
+        1 for s in backends
+        if s.get("type") in ("integration_adapter", "vendor_mcp") and s.get("connected")
+    )
+    status = "ok" if llm_ok and not vault_degraded else "degraded"
     return {
-        "status": "ok" if ok else "degraded",
+        "status": status,
         "version": APP_VERSION,
-        "openai_configured": ok,
+        "llm_configured": llm_ok,
+        "vault_degraded": vault_degraded,
+        "backends": backends,
+        "integrations_connected": integrations_connected,
     }
 
 
 @app.get("/health/llm")
 async def health_llm():
-    if LLM_PROVIDER == "openai" and not OPENAI_API_KEY:
-        return {"status": "degraded", "error": "OPENAI_API_KEY missing"}
-    if LLM_PROVIDER == "local" and not LOCAL_LLM_BASE_URL:
-        return {"status": "degraded", "error": "LOCAL_LLM_BASE_URL missing"}
-    model = LOCAL_LLM_MODEL if LLM_PROVIDER == "local" else OPENAI_MODEL
-    try:
-        client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-        )
-        return {"status": "ok", "provider": LLM_PROVIDER, "model": model}
-    except Exception as exc:
-        return {"status": "degraded", "provider": LLM_PROVIDER, "model": model, "error": str(exc)}
+    llm_settings = _get_llm_settings()
+    llm_adapter = get_llm_adapter()
+    if not llm_adapter:
+        return {"status": "degraded", "error": "LLM not configured"}
+    provider = llm_settings["provider"]
+    if provider == "local":
+        model = llm_settings["local_model"]
+    elif provider == "anthropic":
+        model = llm_settings["anthropic_model"]
+    else:
+        model = llm_settings["openai_model"]
+    result = llm_adapter.health(model)
+    result["provider"] = provider
+    return result
 
+
+@app.get("/metrics")
+async def metrics():
+    with _metrics_lock:
+        return dict(_metrics)
+
+
+@app.get("/version")
+async def version():
+    return {"version": APP_VERSION}
+
+
+# ---------------------------------------------------------------------------
+# Static / auth
+# ---------------------------------------------------------------------------
 
 @app.get("/")
 async def index():
@@ -1022,11 +1287,8 @@ async def auth_me(request: Request):
 async def auth_login(request: Request):
     if not oauth:
         raise HTTPException(status_code=400, detail="Auth0 not configured.")
-    redirect_uri = AUTH0_CALLBACK_URL
     return await oauth.auth0.authorize_redirect(
-        request,
-        redirect_uri=redirect_uri,
-        audience=AUTH0_AUDIENCE or None,
+        request, AUTH0_CALLBACK_URL, audience=AUTH0_AUDIENCE or None
     )
 
 
@@ -1038,10 +1300,12 @@ async def auth_callback(request: Request):
     userinfo = token.get("userinfo") or {}
     role = AUTH0_DEFAULT_ROLE
     group_role = None
+
     if AUTH0_GROUP_CLAIM and AUTH0_GROUP_CLAIM in userinfo:
         claim_value = userinfo.get(AUTH0_GROUP_CLAIM)
         if isinstance(claim_value, list):
             group_role = _role_from_groups([str(v) for v in claim_value])
+
     if not group_role and AUTH0_ROLE_CLAIM and AUTH0_ROLE_CLAIM in userinfo:
         claim_value = userinfo.get(AUTH0_ROLE_CLAIM)
         if isinstance(claim_value, list) and claim_value:
@@ -1054,20 +1318,19 @@ async def auth_callback(request: Request):
         try:
             payload_b64 = token["id_token"].split(".")[1]
             payload_b64 += "=" * (-len(payload_b64) % 4)
-            payload = json.loads(
-                base64.urlsafe_b64decode(payload_b64.encode("utf-8")).decode("utf-8")
-            )
-            if AUTH0_GROUP_CLAIM and AUTH0_GROUP_CLAIM in payload:
-                claim_value = payload.get(AUTH0_GROUP_CLAIM)
-                if isinstance(claim_value, list):
-                    group_role = _role_from_groups([str(v) for v in claim_value])
-            claim_value = payload.get(AUTH0_ROLE_CLAIM)
+            decoded = json.loads(base64.urlsafe_b64decode(payload_b64.encode()).decode())
+            if AUTH0_GROUP_CLAIM and AUTH0_GROUP_CLAIM in decoded:
+                groups = decoded.get(AUTH0_GROUP_CLAIM)
+                if isinstance(groups, list):
+                    group_role = _role_from_groups([str(v) for v in groups])
+            claim_value = decoded.get(AUTH0_ROLE_CLAIM)
             if isinstance(claim_value, list) and claim_value:
                 role = str(claim_value[0])
             elif isinstance(claim_value, str):
                 role = claim_value or role
         except Exception:
             pass
+
     if group_role:
         role = group_role
     request.session["user"] = {
@@ -1081,22 +1344,43 @@ async def auth_callback(request: Request):
 @app.get("/auth/logout")
 async def auth_logout(request: Request):
     request.session.clear()
-    logout_url = (
-        f"https://{AUTH0_DOMAIN}/v2/logout?returnTo={AUTH0_LOGOUT_URL}"
-        f"&client_id={AUTH0_CLIENT_ID}"
+    return RedirectResponse(
+        url=f"https://{AUTH0_DOMAIN}/v2/logout?returnTo={AUTH0_LOGOUT_URL}&client_id={AUTH0_CLIENT_ID}"
     )
-    return RedirectResponse(url=logout_url)
 
+
+# ---------------------------------------------------------------------------
+# Admin endpoints
+# ---------------------------------------------------------------------------
 
 @app.get("/admin/settings")
 async def admin_settings(request: Request):
     role = _get_role_from_request(request)
     if role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required.")
+    schema = []
+    for entry in _SETTINGS_SCHEMA:
+        key = entry["key"]
+        raw_value = get_setting(key, "")
+        is_secret = bool(entry.get("secret"))
+        schema.append(
+            {
+                "key": key,
+                "label": entry.get("label", key),
+                "category": entry.get("category", "General"),
+                "secret": is_secret,
+                "has_value": bool(raw_value),
+                "value": "" if is_secret else raw_value,
+                "restart_required": True,
+            }
+        )
     return {
-        "settings": _settings_snapshot(),
-        "custom_settings": _mask_custom_settings(list_settings()),
-        "note": "Most settings require a server restart to take effect.",
+        "settings": schema,
+        "custom_settings": {
+            k: "********" if re.search(r"(secret|token|pass|key)", k, re.IGNORECASE) else v
+            for k, v in list_settings().items()
+        },
+        "note": "Settings apply on next restart. Use Reload Inventory to pick up devices.yaml changes.",
     }
 
 
@@ -1109,32 +1393,216 @@ async def update_admin_settings(request: Request):
     values = payload.get("settings") if isinstance(payload, dict) else None
     if not isinstance(values, dict):
         raise HTTPException(status_code=400, detail="Expected JSON body with 'settings' object.")
-    set_settings(values)
-    audit_logger.info("admin_settings_update keys=%s", ",".join(sorted(values.keys())))
-    return {"status": "ok", "updated": list(values.keys()), "restart_required": True}
+
+    secret_keys = {e["key"] for e in _SETTINGS_SCHEMA if e.get("secret")}
+    filtered: dict[str, Any] = {}
+    for k, v in values.items():
+        key = str(k)
+        value = "" if v is None else str(v)
+        if key in secret_keys and not value.strip():
+            continue
+        if value == "********" and re.search(r"(secret|token|pass|key)", key, re.IGNORECASE):
+            continue
+        filtered[key] = value
+
+    if not filtered:
+        return {"status": "ok", "updated": [], "restart_required": False}
+
+    set_settings(filtered)
+    _audit_log({"event": "admin_settings_update", "keys": sorted(filtered.keys())})
+    return {"status": "ok", "updated": list(filtered.keys()), "restart_required": True}
 
 
-@app.get("/version")
-async def version():
+@app.post("/admin/reload-inventory")
+async def reload_inventory(request: Request):
+    role = _get_role_from_request(request)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    counts = reload_inventory_devices()
+    _audit_log({"event": "admin_inventory_reload", "counts": counts})
+    return {"status": "ok", "counts": counts}
+
+
+@app.get("/admin/inventory")
+async def admin_inventory(request: Request):
+    role = _get_role_from_request(request)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    registry_path = get_setting(
+        "DEVICE_REGISTRY_PATH",
+        os.path.join(os.path.dirname(__file__), "devices.yaml"),
+    )
+    devices: dict[str, dict] = {"cisco_devices": {}, "juniper_devices": {}, "nokia_devices": {}}
+    if os.path.exists(registry_path):
+        with open(registry_path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        for key in devices:
+            devices[key] = dict(raw.get(key, {}))
     return {
-        "version": APP_VERSION,
+        "counts": {k.replace("_devices", ""): len(v) for k, v in devices.items()},
+        "cisco": [{"name": k, "target": v} for k, v in sorted(devices.get("cisco_devices", {}).items())],
+        "juniper": [{"name": k, "target": v} for k, v in sorted(devices.get("juniper_devices", {}).items())],
+        "nokia": [{"name": k, "target": v} for k, v in sorted(devices.get("nokia_devices", {}).items())],
     }
 
 
-@app.get("/metrics")
-async def metrics():
-    with _metrics_lock:
-        return dict(_metrics)
-if AUTH0_DOMAIN:
-    from authlib.integrations.starlette_client import OAuth
+@app.post("/webhooks/nautobot/inventory")
+async def nautobot_inventory_webhook(request: Request):
+    expected = get_setting("INVENTORY_WEBHOOK_TOKEN", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="INVENTORY_WEBHOOK_TOKEN not configured.")
+    provided = (request.headers.get("X-Webhook-Token", "") or "").strip()
+    if not provided or provided != expected:
+        raise HTTPException(status_code=403, detail="Invalid webhook token.")
 
-    oauth = OAuth()
-    oauth.register(
-        name="auth0",
-        client_id=AUTH0_CLIENT_ID,
-        client_secret=AUTH0_CLIENT_SECRET,
-        server_metadata_url=f"https://{AUTH0_DOMAIN}/.well-known/openid-configuration",
-        client_kwargs={"scope": "openid profile email"},
+    debounce = get_setting_int("INVENTORY_WEBHOOK_DEBOUNCE_SECONDS", 5)
+    now = time.time()
+    with _inventory_webhook_lock:
+        global _inventory_webhook_last_reload
+        if debounce > 0 and now - _inventory_webhook_last_reload < debounce:
+            return {"status": "ok", "skipped": True, "reason": "debounced"}
+        _inventory_webhook_last_reload = now
+
+    webhook_payload: dict = {}
+    try:
+        webhook_payload = await request.json()
+    except Exception:
+        pass
+
+    counts = reload_inventory_devices()
+    _audit_log(
+        {
+            "event": "inventory_webhook_reload",
+            "source": "nautobot",
+            "counts": counts,
+            "webhook_event": webhook_payload.get("event") if isinstance(webhook_payload, dict) else None,
+        }
     )
-else:
-    oauth = None
+    return {"status": "ok", "counts": counts}
+
+
+@app.post("/admin/inventory/import-csv")
+async def import_inventory_csv(request: Request, file: UploadFile):
+    role = _get_role_from_request(request)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a CSV file.")
+
+    registry_path = get_setting(
+        "DEVICE_REGISTRY_PATH",
+        os.path.join(os.path.dirname(__file__), "devices.yaml"),
+    )
+    devices: dict[str, dict] = {"cisco_devices": {}, "juniper_devices": {}, "nokia_devices": {}}
+    if os.path.exists(registry_path):
+        with open(registry_path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        for key in devices:
+            devices[key] = dict(raw.get(key, {}))
+
+    content = await file.read()
+    rows = list(csv.DictReader(content.decode("utf-8").splitlines()))
+    if not rows:
+        raise HTTPException(status_code=400, detail="CSV file is empty.")
+
+    added = updated = skipped = 0
+    errors: list[str] = []
+
+    def _normalize_vendor(v: str) -> str:
+        c = v.strip().lower()
+        if c in {"cisco", "iosxr", "ios-xr"}:
+            return "cisco_devices"
+        if c in {"juniper", "junos"}:
+            return "juniper_devices"
+        if c in {"nokia", "sros", "sr-os", "sr os"}:
+            return "nokia_devices"
+        return ""
+
+    _SAFE_DEVICE_NAME = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
+    _SAFE_HOST = re.compile(r"^[a-zA-Z0-9._:-]{1,255}$")
+
+    for row in rows:
+        name = (row.get("device") or row.get("name") or row.get("hostname") or "").strip()
+        vendor = (row.get("vendor") or row.get("platform") or "").strip()
+        host = (row.get("ip") or row.get("host") or row.get("address") or "").strip()
+        port = (row.get("port") or "").strip()
+        if not name or not vendor or not host:
+            skipped += 1
+            errors.append(f"Missing required fields: {row}")
+            continue
+        if not _SAFE_DEVICE_NAME.match(name):
+            skipped += 1
+            errors.append(f"Invalid device name '{name}' — only alphanumeric, dots, hyphens allowed.")
+            continue
+        if not _SAFE_HOST.match(host):
+            skipped += 1
+            errors.append(f"Invalid host value '{host}' for '{name}'.")
+            continue
+        registry_key = _normalize_vendor(vendor)
+        if not registry_key:
+            skipped += 1
+            errors.append(f"Unsupported vendor '{vendor}' for '{name}'")
+            continue
+        address = f"{host}:{port}" if port else host
+        if name in devices[registry_key]:
+            updated += 1
+        else:
+            added += 1
+        devices[registry_key][name] = address
+
+    with open(registry_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(devices, f, sort_keys=False)
+    counts = reload_inventory_devices()
+
+    _audit_log(
+        {
+            "event": "inventory_csv_import",
+            "added": added,
+            "updated": updated,
+            "skipped": skipped,
+            "file": file.filename,
+            "counts": counts,
+        }
+    )
+    return {
+        "status": "ok",
+        "added": added,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors[:10],
+        "counts": counts,
+    }
+
+
+@app.get("/admin/playbooks")
+async def admin_playbooks(request: Request):
+    role = _get_role_from_request(request)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return {"status": "ok", "playbooks": list_playbooks()}
+
+
+@app.post("/admin/playbooks")
+async def update_playbooks(request: Request):
+    role = _get_role_from_request(request)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    payload = await request.json()
+    items = payload.get("playbooks") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="Expected JSON body with 'playbooks' list.")
+    upsert_playbooks(items)
+    _audit_log({"event": "playbooks_update", "count": len(items)})
+    return {"status": "ok", "count": len(items)}
+
+
+@app.delete("/admin/playbooks/{playbook_id}")
+async def delete_playbook_endpoint(playbook_id: str, request: Request):
+    role = _get_role_from_request(request)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    removed = delete_playbook(playbook_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Playbook not found.")
+    _audit_log({"event": "playbook_delete", "id": playbook_id})
+    return {"status": "ok", "id": playbook_id}

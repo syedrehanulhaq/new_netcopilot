@@ -1,8 +1,33 @@
+# OS
 .DS_Store
-.env
+Thumbs.db
+
+# Python
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Credentials — never commit
+.env
+secrets.local.yaml
+litellm.yaml
+
+# Runtime data — generated at runtime, not source
 *.db
 logs/
-litellm.yaml
+.runtime/
+data/
+
+# Large binary files — not useful in git history
+*.pptx
+*.key
+*.p12
+
+# Editor
+.idea/
+.vscode/
+*.swp

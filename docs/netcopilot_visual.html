@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NetCopilot — Visual Guide</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#0d1117; --bg2:#161b22; --bg3:#1c2128; --bg4:#21262d;
+  --border:#30363d; --text:#e6edf3; --muted:#7d8590; --dim:#484f58;
+  --blue:#388bfd; --blue-d:#0d2044; --blue-b:#1f4e91;
+  --purple:#bc8cff; --purple-d:#1e1133; --purple-b:#6e3fbd;
+  --green:#3fb950; --green-d:#0d2a16; --green-b:#1a5c2a;
+  --yellow:#d29922; --yellow-d:#2a1c00; --yellow-b:#5a3d00;
+  --orange:#f0883e; --orange-d:#2a1200; --orange-b:#5a2a00;
+  --red:#f85149; --red-d:#2d0f0f; --red-b:#6e1c1c;
+  --cyan:#79c0ff; --teal:#39d353;
+}
+
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+
+/* ── Nav ── */
+.nav{position:sticky;top:0;z-index:100;background:rgba(13,17,23,.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.nav a{font-size:.68rem;font-weight:600;padding:4px 10px;border-radius:20px;border:1px solid var(--border);color:var(--muted);text-decoration:none;white-space:nowrap;transition:all .15s}
+.nav a:hover{color:var(--text);border-color:var(--dim)}
+.nav-title{font-size:.8rem;font-weight:700;color:var(--text);margin-right:8px;white-space:nowrap}
+
+/* ── Page layout ── */
+.page{max-width:1100px;margin:0 auto;padding:40px 24px 80px}
+.section{margin-bottom:60px}
+.section-title{font-size:1.1rem;font-weight:700;color:#f0f6fc;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+.section-title::after{content:'';flex:1;height:1px;background:var(--border)}
+.section-sub{font-size:.78rem;color:var(--muted);margin-bottom:24px}
+
+/* ── Generic card ── */
+.card{border-radius:10px;border:1px solid var(--border);background:var(--bg2);padding:14px 16px}
+.card-title{font-weight:700;font-size:.82rem;margin-bottom:4px}
+.card-body{font-size:.72rem;color:var(--muted);line-height:1.6}
+.card-body code{background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:.7rem;color:var(--cyan)}
+
+/* colour variants */
+.c-blue  {background:var(--blue-d);border-color:var(--blue-b)}  .c-blue  .card-title{color:var(--blue)}
+.c-purple{background:var(--purple-d);border-color:var(--purple-b)}.c-purple .card-title{color:var(--purple)}
+.c-green {background:var(--green-d);border-color:var(--green-b)} .c-green  .card-title{color:var(--green)}
+.c-yellow{background:var(--yellow-d);border-color:var(--yellow-b)}.c-yellow .card-title{color:var(--yellow)}
+.c-orange{background:var(--orange-d);border-color:var(--orange-b)}.c-orange .card-title{color:var(--orange)}
+.c-red   {background:var(--red-d);border-color:var(--red-b)}    .c-red    .card-title{color:var(--red)}
+
+/* pill */
+.pill{display:inline-block;border-radius:20px;padding:1px 8px;font-size:.65rem;font-weight:600;border:1px solid;margin:2px 2px 0}
+.p-blue  {color:var(--blue);  border-color:var(--blue-b);  background:rgba(56,139,253,.1)}
+.p-purple{color:var(--purple);border-color:var(--purple-b);background:rgba(188,140,255,.1)}
+.p-green {color:var(--green); border-color:var(--green-b); background:rgba(63,185,80,.1)}
+.p-yellow{color:var(--yellow);border-color:var(--yellow-b);background:rgba(210,153,34,.1)}
+.p-orange{color:var(--orange);border-color:var(--orange-b);background:rgba(240,136,62,.1)}
+.p-red   {color:var(--red);   border-color:var(--red-b);   background:rgba(248,81,73,.1)}
+.p-muted {color:var(--muted); border-color:var(--border);  background:var(--bg3)}
+.p-cyan  {color:var(--cyan);  border-color:#1f4e6e;         background:rgba(121,192,255,.1)}
+
+/* arrow helpers */
+.arr-r{color:var(--dim);font-size:.9rem;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.arr-d{color:var(--dim);font-size:.9rem;text-align:center;padding:2px 0;line-height:1}
+
+/* ═══════════════════════════════════════
+   HERO
+══════════════════════════════════════ */
+.hero{text-align:center;padding:48px 0 40px}
+.hero h1{font-size:2.2rem;font-weight:800;background:linear-gradient(135deg,#79c0ff,#bc8cff,#3fb950);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px}
+.hero p{font-size:.9rem;color:var(--muted);max-width:600px;margin:0 auto}
+.hero-chips{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px}
+
+/* ═══════════════════════════════════════
+   1. PROBLEM → SOLUTION
+══════════════════════════════════════ */
+.before-after{display:grid;grid-template-columns:1fr 60px 1fr;gap:0;align-items:center}
+.ba-col{display:flex;flex-direction:column;gap:8px}
+.ba-title{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px}
+.ba-item{display:flex;align-items:center;gap:8px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:.75rem}
+.ba-icon{font-size:1.1rem;flex-shrink:0}
+.transform-col{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.transform-arrow{font-size:2rem;color:var(--purple)}
+.transform-label{font-size:.6rem;color:var(--purple);font-weight:700;text-align:center}
+
+/* ═══════════════════════════════════════
+   2. FILE MAP
+══════════════════════════════════════ */
+.file-map{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.file-group{border-radius:10px;border:1px solid var(--border);background:var(--bg2);overflow:hidden}
+.file-group-header{padding:10px 14px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.file-group-body{padding:8px 14px 12px}
+.file-row{display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid #1c2128;font-size:.72rem}
+.file-row:last-child{border-bottom:none}
+.file-name{font-family:monospace;font-weight:600;white-space:nowrap;flex-shrink:0}
+.file-desc{color:var(--muted);line-height:1.4}
+
+/* ═══════════════════════════════════════
+   3. STARTUP TIMELINE
+══════════════════════════════════════ */
+.timeline{position:relative;padding:10px 0}
+.timeline::before{content:'';position:absolute;left:32px;top:0;bottom:0;width:2px;background:linear-gradient(to bottom,var(--purple-b),var(--blue-b),var(--green-b))}
+.tl-item{display:flex;gap:20px;margin-bottom:24px;position:relative}
+.tl-num{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;position:relative;z-index:1;border:2px solid}
+.tl-content{flex:1;padding-top:12px}
+.tl-title{font-weight:700;font-size:.85rem;margin-bottom:4px}
+.tl-body{font-size:.73rem;color:var(--muted);line-height:1.6}
+
+/* ═══════════════════════════════════════
+   4. SETTINGS CHAIN
+══════════════════════════════════════ */
+.settings-chain{display:flex;align-items:stretch;gap:0;border-radius:12px;overflow:hidden;border:1px solid var(--border)}
+.sc-step{flex:1;padding:20px 16px;text-align:center;position:relative}
+.sc-step:not(:last-child)::after{content:'→';position:absolute;right:-10px;top:50%;transform:translateY(-50%);font-size:1.2rem;color:var(--muted);z-index:1}
+.sc-icon{font-size:1.8rem;margin-bottom:8px}
+.sc-title{font-size:.8rem;font-weight:700;margin-bottom:4px}
+.sc-body{font-size:.68rem;color:var(--muted);line-height:1.5}
+.sc-priority{display:inline-block;background:var(--bg3);border:1px solid var(--border);border-radius:4px;font-size:.6rem;font-weight:700;padding:1px 6px;margin-bottom:6px;color:var(--muted)}
+
+/* ═══════════════════════════════════════
+   5. AGENTIC LOOP
+══════════════════════════════════════ */
+.loop-wrap{border:2px solid var(--purple-b);border-radius:16px;background:var(--purple-d);padding:28px;position:relative}
+.loop-label{position:absolute;top:-13px;left:20px;background:var(--purple-d);padding:0 10px;font-size:.72rem;font-weight:700;color:var(--purple);letter-spacing:.05em}
+
+.loop-row{display:flex;align-items:center;gap:0}
+.loop-box{flex:1;border-radius:10px;border:1px solid var(--purple-b);background:rgba(30,17,51,.7);padding:16px;text-align:center}
+.loop-box-icon{font-size:1.6rem;margin-bottom:6px}
+.loop-box-title{font-size:.8rem;font-weight:700;color:var(--purple);margin-bottom:6px}
+.loop-box-body{font-size:.68rem;color:#9775fa;line-height:1.6}
+.loop-arr{width:48px;text-align:center;font-size:1.2rem;color:var(--purple);flex-shrink:0}
+
+.loop-feedback{display:flex;align-items:center;justify-content:center;margin-top:16px;gap:12px;padding-top:14px;border-top:1px solid rgba(110,63,189,.3)}
+.loop-feedback-arrow{font-size:1rem;color:var(--purple)}
+.loop-feedback-text{font-size:.7rem;color:#9775fa;text-align:center}
+
+.loop-branch{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.branch-box{border-radius:8px;padding:12px;text-align:center;font-size:.72rem}
+.branch-yes{background:var(--green-d);border:1px solid var(--green-b);color:var(--green)}
+.branch-no{background:var(--blue-d);border:1px solid var(--blue-b);color:var(--blue)}
+.branch-title{font-weight:700;font-size:.75rem;margin-bottom:4px}
+
+/* ═══════════════════════════════════════
+   6. DISPATCHER
+══════════════════════════════════════ */
+.dispatch-wrap{border:2px solid var(--yellow-b);border-radius:16px;background:var(--yellow-d);padding:28px;position:relative}
+.dispatch-label{position:absolute;top:-13px;left:20px;background:var(--yellow-d);padding:0 10px;font-size:.72rem;font-weight:700;color:var(--yellow);letter-spacing:.05em}
+.dispatch-grid{display:grid;grid-template-columns:1fr 50px 1fr;gap:0;align-items:start}
+.dispatch-col-title{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--yellow);margin-bottom:10px}
+.route-from{display:flex;flex-direction:column;gap:6px}
+.route-to{display:flex;flex-direction:column;gap:6px}
+.route-item{display:flex;align-items:center;gap:8px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:9px 11px}
+.ri-trigger{font-family:monospace;font-size:.73rem;color:var(--cyan);font-weight:600;white-space:nowrap}
+.ri-desc{font-size:.68rem;color:var(--muted)}
+.ri-icon{font-size:1rem;flex-shrink:0}
+.ri-name{font-size:.75rem;font-weight:700}
+.ri-detail{font-size:.65rem;color:var(--muted);margin-top:1px}
+.dispatch-center{display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;padding-top:24px}
+.dispatch-arr{font-size:1.4rem;color:var(--yellow)}
+
+/* ═══════════════════════════════════════
+   7. DEVICE ADAPTER STACK
+══════════════════════════════════════ */
+.adapter-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.adapter-col{border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+.adapter-header{padding:12px 14px;text-align:center}
+.adapter-layer{padding:10px 14px;border-top:1px solid var(--border);font-size:.72rem;text-align:center}
+.layer-label{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:3px}
+.layer-value{font-weight:600}
+
+/* ═══════════════════════════════════════
+   8. PLAYBOOK PIPELINE
+══════════════════════════════════════ */
+.pb-example{border-radius:12px;border:1px solid var(--border);background:var(--bg2);overflow:hidden}
+.pb-header{display:grid;grid-template-columns:180px 1fr 1fr;gap:0;background:var(--bg3);border-bottom:1px solid var(--border)}
+.pb-hcell{padding:10px 14px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.pb-row{display:grid;grid-template-columns:180px 1fr 1fr;gap:0;border-bottom:1px solid #1c2128;align-items:center}
+.pb-row:last-child{border-bottom:none}
+.pb-cell{padding:10px 14px;font-size:.73rem}
+.pb-intent{font-family:monospace;color:var(--cyan);font-weight:600}
+.pb-tools{color:var(--muted);font-size:.68rem}
+.pb-severity{display:flex;gap:4px;flex-wrap:wrap}
+
+.pb-flow{display:flex;align-items:center;gap:0;margin-top:20px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
+.pb-step{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center;min-width:120px;flex-shrink:0}
+.pb-step-num{width:22px;height:22px;border-radius:50%;margin:0 auto 6px;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;background:var(--bg3);border:1px solid var(--border);color:var(--muted)}
+.pb-step-name{font-size:.68rem;color:var(--muted);line-height:1.4}
+.pb-flow-arr{flex-shrink:0;color:var(--dim);font-size:.8rem;padding:0 4px}
+
+.pb-output{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+.pb-out-box{border-radius:8px;padding:12px;text-align:center}
+.pb-out-title{font-size:.7rem;font-weight:700;margin-bottom:4px}
+.pb-out-body{font-size:.68rem;color:var(--muted);line-height:1.5}
+
+/* ═══════════════════════════════════════
+   9. SLACK PATHS
+══════════════════════════════════════ */
+.slack-paths{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.sp-box{border-radius:10px;border:1px solid var(--border);background:var(--bg2);overflow:hidden}
+.sp-header{padding:10px 14px;font-size:.73rem;font-weight:700}
+.sp-body{padding:0 14px 14px}
+.sp-step{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #1c2128;font-size:.7rem}
+.sp-step:last-child{border-bottom:none}
+.sp-arr{color:var(--dim);flex-shrink:0;margin-top:1px}
+.sp-text{color:var(--muted);line-height:1.5}
+.sp-text strong{color:var(--text)}
+
+/* ═══════════════════════════════════════
+   10. ROLE MATRIX
+══════════════════════════════════════ */
+.role-matrix{border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+.rm-header{display:grid;grid-template-columns:1fr repeat(3,120px);background:var(--bg3);border-bottom:1px solid var(--border)}
+.rm-hcell{padding:10px 14px;font-size:.7rem;font-weight:700;text-align:center;text-transform:uppercase;letter-spacing:.06em}
+.rm-hcell:first-child{text-align:left}
+.rm-row{display:grid;grid-template-columns:1fr repeat(3,120px);border-bottom:1px solid #1c2128;align-items:center}
+.rm-row:last-child{border-bottom:none}
+.rm-cell{padding:10px 14px;font-size:.72rem;text-align:center}
+.rm-cell:first-child{text-align:left;color:var(--text);font-weight:500}
+.rm-yes{color:var(--green);font-size:1rem}
+.rm-no{color:var(--dim);font-size:1rem}
+.rm-partial{color:var(--yellow);font-size:.7rem;font-weight:600}
+
+/* ═══════════════════════════════════════
+   11. ALERT PIPELINE
+══════════════════════════════════════ */
+.alert-pipeline{display:flex;flex-direction:column;gap:0}
+.ap-row{display:grid;grid-template-columns:160px 40px 1fr;gap:0;align-items:center}
+.ap-actor{text-align:right;padding:12px 14px 12px 0;border-right:2px solid var(--border);font-size:.72rem;font-weight:700}
+.ap-dot{display:flex;align-items:center;justify-content:center;position:relative}
+.ap-dot::before{content:'';width:10px;height:10px;border-radius:50%;border:2px solid}
+.ap-content{padding:10px 0 10px 18px;border-bottom:1px solid #1c2128;font-size:.73rem}
+.ap-row:last-child .ap-content{border-bottom:none}
+.ap-msg{font-weight:500;margin-bottom:2px}
+.ap-detail{font-size:.68rem;color:var(--muted)}
+
+/* ═══════════════════════════════════════
+   12. DOCKER DEPLOYMENT
+══════════════════════════════════════ */
+.docker-wrap{border:2px solid var(--border);border-radius:14px;background:var(--bg2);overflow:hidden}
+.docker-header{background:var(--bg3);padding:12px 20px;font-size:.75rem;font-weight:700;color:var(--muted);display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)}
+.docker-body{padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.container-box{border-radius:10px;border:2px solid;padding:16px}
+.container-name{font-size:.85rem;font-weight:700;margin-bottom:4px}
+.container-image{font-family:monospace;font-size:.68rem;color:var(--muted);margin-bottom:10px}
+.container-detail{font-size:.72rem;color:var(--muted);line-height:1.8}
+.docker-volumes{margin-top:14px;padding:14px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);grid-column:1/-1}
+.vol-title{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px}
+.vol-row{display:flex;gap:12px;margin-bottom:6px;font-size:.72rem;align-items:flex-start}
+.vol-name{font-family:monospace;color:var(--cyan);flex-shrink:0}
+
+/* ═══════════════════════════════════════
+   13. SAFETY LAYERS
+══════════════════════════════════════ */
+.safety-layers{display:flex;flex-direction:column;gap:0;border-radius:12px;overflow:hidden;border:2px solid var(--red-b)}
+.sl-row{display:flex;align-items:stretch;gap:0}
+.sl-num{width:56px;background:var(--red-d);display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:800;color:var(--red);flex-shrink:0;border-right:1px solid var(--red-b)}
+.sl-content{flex:1;padding:14px 18px;border-bottom:1px solid #2d0f0f}
+.sl-row:last-child .sl-content{border-bottom:none}
+.sl-title{font-weight:700;font-size:.82rem;color:var(--red);margin-bottom:4px}
+.sl-body{font-size:.72rem;color:var(--muted);line-height:1.6}
+.sl-code{font-family:monospace;font-size:.68rem;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:4px 8px;margin-top:6px;display:inline-block;color:var(--cyan)}
+
+/* ═══════════════════════════════════════
+   FULL FLOW trace
+══════════════════════════════════════ */
+.trace-wrap{border-radius:12px;border:1px solid var(--border);background:var(--bg2);overflow:hidden}
+.trace-row{display:grid;grid-template-columns:140px 1fr;align-items:stretch;border-bottom:1px solid #1c2128}
+.trace-row:last-child{border-bottom:none}
+.trace-actor{padding:12px 14px;border-right:2px solid var(--border);display:flex;align-items:center;justify-content:flex-end}
+.ta-label{font-size:.7rem;font-weight:700;text-align:right}
+.trace-content{padding:12px 16px;font-size:.73rem}
+.tc-msg{margin-bottom:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tc-detail{font-size:.67rem;color:var(--muted)}
+
+/* responsive */
+@media(max-width:760px){
+  .file-map,.adapter-cols,.slack-paths,.before-after,.dispatch-grid,.docker-body{grid-template-columns:1fr}
+  .before-after .transform-col{display:none}
+  .pb-header,.pb-row{grid-template-columns:1fr}
+  .rm-header,.rm-row{grid-template-columns:1fr 70px 70px 70px}
+  .loop-branch{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="nav-title">NetCopilot</span>
+  <a href="#problem">Problem</a>
+  <a href="#files">Files</a>
+  <a href="#startup">Startup</a>
+  <a href="#settings">Settings</a>
+  <a href="#loop">AI Loop</a>
+  <a href="#dispatcher">Dispatcher</a>
+  <a href="#adapters">Adapters</a>
+  <a href="#mcp">MCP</a>
+  <a href="#playbooks">Playbooks</a>
+  <a href="#slack">Slack</a>
+  <a href="#roles">Roles</a>
+  <a href="#alerts">Alerts</a>
+  <a href="#docker">Docker</a>
+  <a href="#safety">Safety</a>
+  <a href="#trace">Full trace</a>
+</nav>
+
+<div class="page">
+
+<!-- HERO -->
+<div class="hero">
+  <h1>NetCopilot</h1>
+  <p>AI-powered NOC assistant — engineer asks a question, AI logs into the device, investigates, and writes the diagnosis.</p>
+  <div class="hero-chips">
+    <span class="pill p-blue">FastAPI</span>
+    <span class="pill p-purple">GPT-4o / Claude</span>
+    <span class="pill p-orange">Cisco IOS XR</span>
+    <span class="pill p-orange">Juniper Junos</span>
+    <span class="pill p-red">Nokia SR OS</span>
+    <span class="pill p-green">Jira · Prometheus · Loki</span>
+    <span class="pill p-muted">Read-only · Audit-logged · RBAC</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     PROBLEM / SOLUTION
+══════════════════════════════════════════════ -->
+<div class="section" id="problem">
+  <div class="section-title">🔴 Before vs 🟢 After</div>
+  <div class="section-sub">What engineers had to do manually — vs what NetCopilot does automatically</div>
+
+  <div class="before-after">
+    <div class="ba-col">
+      <div class="ba-title" style="color:var(--red)">🔴 Before — manual NOC</div>
+      <div class="ba-item"><span class="ba-icon">🔑</span><div>SSH into router, type vendor-specific show commands from memory</div></div>
+      <div class="ba-item"><span class="ba-icon">📋</span><div>Copy-paste output into notepad, manually read counters</div></div>
+      <div class="ba-item"><span class="ba-icon">🔁</span><div>Repeat for every affected device (10+ steps per alarm)</div></div>
+      <div class="ba-item"><span class="ba-icon">📊</span><div>Open Prometheus/Grafana in another tab, search for the metric</div></div>
+      <div class="ba-item"><span class="ba-icon">📝</span><div>Manually fill in Jira ticket with findings</div></div>
+      <div class="ba-item"><span class="ba-icon">⏱️</span><div>15–45 minutes per incident just for investigation</div></div>
+    </div>
+
+    <div class="transform-col">
+      <div class="transform-arrow">⇒</div>
+      <div class="transform-label">NetCopilot</div>
+    </div>
+
+    <div class="ba-col">
+      <div class="ba-title" style="color:var(--green)">🟢 After — NetCopilot</div>
+      <div class="ba-item" style="border-color:var(--green-b);background:var(--green-d)"><span class="ba-icon">💬</span><div style="color:var(--green)">"Why is BGP down on pe1?" — plain English question</div></div>
+      <div class="ba-item" style="border-color:var(--green-b);background:var(--green-d)"><span class="ba-icon">🤖</span><div style="color:var(--green)">AI picks the right tools, SSHes into device automatically</div></div>
+      <div class="ba-item" style="border-color:var(--green-b);background:var(--green-d)"><span class="ba-icon">🔄</span><div style="color:var(--green)">Loops through multiple checks in parallel, scores severity</div></div>
+      <div class="ba-item" style="border-color:var(--green-b);background:var(--green-d)"><span class="ba-icon">📄</span><div style="color:var(--green)">Returns structured diagnosis: Status → Evidence → Root cause → Next steps</div></div>
+      <div class="ba-item" style="border-color:var(--green-b);background:var(--green-d)"><span class="ba-icon">🎫</span><div style="color:var(--green)">/noc ticket — Jira ticket created with AI findings pre-filled</div></div>
+      <div class="ba-item" style="border-color:var(--green-b);background:var(--green-d)"><span class="ba-icon">⚡</span><div style="color:var(--green)">30 seconds to full diagnosis, every time, same quality</div></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     FILE MAP
+══════════════════════════════════════════════ -->
+<div class="section" id="files">
+  <div class="section-title">📁 What each file does</div>
+  <div class="section-sub">Colour = layer. Click a section to see details further down.</div>
+
+  <div class="file-map">
+
+    <div class="file-group" style="border-color:var(--green-b)">
+      <div class="file-group-header" style="background:var(--green-d);color:var(--green)">⚙️ Core application</div>
+      <div class="file-group-body">
+        <div class="file-row"><span class="file-name" style="color:var(--cyan)">app.py</span><span class="file-desc">Web server. ALL endpoints live here. Runs the agentic loop.</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--cyan)">config.py</span><span class="file-desc">Reads all settings once at startup (credentials, URLs, flags).</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--cyan)">settings.py</span><span class="file-desc">SQLite-backed settings. Read per-request — no restart needed to change values.</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--cyan)">credentials.py</span><span class="file-desc">Fetches secrets at call time (env var / SQLite / Vault).</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--cyan)">devices.yaml</span><span class="file-desc">Device registry: name → vendor, host, port. Single source of truth.</span></div>
+      </div>
+    </div>
+
+    <div class="file-group" style="border-color:var(--purple-b)">
+      <div class="file-group-header" style="background:var(--purple-d);color:var(--purple)">🤖 LLM + prompts</div>
+      <div class="file-group-body">
+        <div class="file-row"><span class="file-name" style="color:var(--purple)">llm/prompts.py</span><span class="file-desc">The system prompt the LLM reads before every conversation. Injected with live device inventory.</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--purple)">adapters/llm.py</span><span class="file-desc">Provider abstraction. Switches between OpenAI, Anthropic, or local Ollama based on setting.</span></div>
+      </div>
+    </div>
+
+    <div class="file-group" style="border-color:var(--yellow-b)">
+      <div class="file-group-header" style="background:var(--yellow-d);color:var(--yellow)">🚦 Dispatcher + registry</div>
+      <div class="file-group-body">
+        <div class="file-row"><span class="file-name" style="color:var(--yellow)">adapters/devices/dispatcher.py</span><span class="file-desc">THE router. Every tool call passes here. Routes to right backend by prefix.</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--yellow)">adapters/devices/registry.py</span><span class="file-desc">Loads devices.yaml. Answers: "what vendor is pe1?" → "junos".</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--yellow)">adapters/devices/pool.py</span><span class="file-desc">SSH connection pool (60s TTL) + circuit breaker (stops retrying broken devices).</span></div>
+      </div>
+    </div>
+
+    <div class="file-group" style="border-color:var(--blue-b)">
+      <div class="file-group-header" style="background:var(--blue-d);color:var(--blue)">📡 Device adapters</div>
+      <div class="file-group-body">
+        <div class="file-row"><span class="file-name" style="color:var(--blue)">adapters/devices/cisco.py</span><span class="file-desc">18 tools. Netmiko SSH. CLI text parsing.</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--blue)">adapters/devices/junos.py</span><span class="file-desc">19 tools. PyEZ NETCONF. Returns structured XML — most reliable.</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--blue)">adapters/devices/nokia.py</span><span class="file-desc">18 tools. Netmiko SSH. CLI text parsing.</span></div>
+      </div>
+    </div>
+
+    <div class="file-group" style="border-color:var(--green-b)">
+      <div class="file-group-header" style="background:var(--green-d);color:var(--green)">🔗 Integration adapters</div>
+      <div class="file-group-body">
+        <div class="file-row"><span class="file-name" style="color:var(--green)">adapters/integrations/jira.py</span><span class="file-desc">4 tools. Direct httpx. Used by Slack /noc ticket fast path.</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--green)">adapters/integrations/prometheus.py</span><span class="file-desc">5 tools. PromQL queries over httpx.</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--green)">adapters/integrations/syslog.py</span><span class="file-desc">5 tools. Loki LogQL queries over httpx.</span></div>
+      </div>
+    </div>
+
+    <div class="file-group" style="border-color:var(--orange-b)">
+      <div class="file-group-header" style="background:var(--orange-d);color:var(--orange)">📋 Playbooks + MCP</div>
+      <div class="file-group-body">
+        <div class="file-row"><span class="file-name" style="color:var(--orange)">playbooks/playbooks.yaml</span><span class="file-desc">9 diagnostic recipes: bgp_down, link_flap, cpu_high… with severity rules.</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--orange)">playbooks/runner.py</span><span class="file-desc">Executes playbooks, scores severity, extracts evidence fields.</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--orange)">mcp_client/client.py</span><span class="file-desc">Connects to mcp-atlassian at startup. Discovers 48 Jira tools dynamically.</span></div>
+        <div class="file-row"><span class="file-name" style="color:var(--orange)">mcp_servers.yaml</span><span class="file-desc">Which external MCP servers to connect to (currently: jira only).</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     STARTUP
+══════════════════════════════════════════════ -->
+<div class="section" id="startup">
+  <div class="section-title">🚀 Startup sequence</div>
+  <div class="section-sub">5 things happen in order before the first request is served</div>
+
+  <div class="timeline">
+    <div class="tl-item">
+      <div class="tl-num" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">💾</div>
+      <div class="tl-content">
+        <div class="tl-title" style="color:var(--purple)">1 — Init memory.db</div>
+        <div class="tl-body">Creates the SQLite conversation history database. Stores the last 12 exchanges per user so the LLM remembers context across messages. The LLM does not have built-in memory — this file is its memory.</div>
+      </div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-num" style="background:var(--red-d);border-color:var(--red-b);color:var(--red)">🔔</div>
+      <div class="tl-content">
+        <div class="tl-title" style="color:var(--red)">2 — Init alerts.db</div>
+        <div class="tl-body">Creates the alerts database. When Prometheus/PagerDuty fires an alert via <code>/alerts/ingest</code>, it is stored here keyed by Slack channel ID. The Slack handler reads it when <code>/noc investigate</code> is called.</div>
+      </div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-num" style="background:var(--yellow-d);border-color:var(--yellow-b);color:var(--yellow)">📋</div>
+      <div class="tl-content">
+        <div class="tl-title" style="color:var(--yellow)">3 — Load device registry</div>
+        <div class="tl-body">Reads <code>devices.yaml</code> into memory. Every subsequent <code>get_vendor("pe1")</code> call returns instantly from this cache. The LLM system prompt is also populated with this inventory so the AI knows which vendor to use for each device.</div>
+      </div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-num" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">🔌</div>
+      <div class="tl-content">
+        <div class="tl-title" style="color:var(--purple)">4 — Connect MCP client</div>
+        <div class="tl-body">Opens a persistent SSE connection to mcp-atlassian (port 8104). Sends an initialize handshake, then calls <code>list_tools()</code> to discover all 48 Jira tools dynamically. These are stored in memory prefixed as <code>jira_create_issue</code>, <code>jira_search_issues</code>, etc.</div>
+      </div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-num" style="background:var(--green-d);border-color:var(--green-b);color:var(--green)">⚡</div>
+      <div class="tl-content">
+        <div class="tl-title" style="color:var(--green)">5 — Create Tool Dispatcher</div>
+        <div class="tl-body">Instantiates <code>ToolDispatcher(mcp_client=...)</code> as a singleton. This is the routing brain for all subsequent tool calls. Server is now ready to accept requests.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     SETTINGS
+══════════════════════════════════════════════ -->
+<div class="section" id="settings">
+  <div class="section-title">⚙️ How settings and credentials work</div>
+  <div class="section-sub">Every <code>get_setting("KEY")</code> call checks three places in order. No restart needed to change values.</div>
+
+  <div class="settings-chain">
+    <div class="sc-step" style="background:var(--purple-d);border-color:var(--purple-b)">
+      <div class="sc-priority">PRIORITY 1 — HIGHEST</div>
+      <div class="sc-icon">🗄️</div>
+      <div class="sc-title" style="color:var(--purple)">settings.db (SQLite)</div>
+      <div class="sc-body">Admin edits a value in the web UI at <code>/admin/settings</code>. Stored in SQLite. Takes effect on the <em>next request</em> — no restart. This is the intended way to manage production secrets.</div>
+    </div>
+    <div class="sc-step" style="background:var(--blue-d);border-color:var(--blue-b)">
+      <div class="sc-priority">PRIORITY 2</div>
+      <div class="sc-icon">🌍</div>
+      <div class="sc-title" style="color:var(--blue)">Environment variable</div>
+      <div class="sc-body">Set in <code>.env</code> file (dev) or Docker env vars (production). Used when no SQLite value exists. Good for initial setup and container deployments.</div>
+    </div>
+    <div class="sc-step" style="background:var(--bg3);border-color:var(--border)">
+      <div class="sc-priority">PRIORITY 3 — LOWEST</div>
+      <div class="sc-icon">📄</div>
+      <div class="sc-title" style="color:var(--muted)">Default value</div>
+      <div class="sc-body">Hardcoded fallback in the source code. E.g. model defaults to <code>gpt-4.1-mini</code>, port defaults to <code>830</code>. Only used if neither DB nor env var is set.</div>
+    </div>
+  </div>
+
+  <div style="margin-top:14px;padding:14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-size:.73rem;color:var(--muted)">
+    <strong style="color:var(--text)">Why this matters:</strong> Device credentials (<code>JUNIPER_PASS</code>, etc.) are fetched by <code>credentials.get_secret()</code> <em>inside each tool call</em>, not at startup. Rotating a password in the UI takes effect immediately on the next SSH connection — no restart, no dropped sessions.
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     AGENTIC LOOP
+══════════════════════════════════════════════ -->
+<div class="section" id="loop">
+  <div class="section-title">🔄 The Agentic AI Loop</div>
+  <div class="section-sub">The LLM doesn't answer once — it loops, calling tools until it has enough data</div>
+
+  <div class="loop-wrap">
+    <div class="loop-label">AGENTIC LOOP — repeats up to 10 times per question</div>
+
+    <div class="loop-row">
+      <div class="loop-box">
+        <div class="loop-box-icon">📨</div>
+        <div class="loop-box-title">Build the message list</div>
+        <div class="loop-box-body">
+          Combine:<br>
+          <strong style="color:#bc8cff">① System prompt</strong> (device inventory, rules)<br>
+          <strong style="color:#bc8cff">② Conversation history</strong> (last 12 turns)<br>
+          <strong style="color:#bc8cff">③ User's message</strong><br>
+          <strong style="color:#bc8cff">④ All tool results so far</strong>
+        </div>
+      </div>
+      <div class="loop-arr">→</div>
+      <div class="loop-box">
+        <div class="loop-box-icon">🧠</div>
+        <div class="loop-box-title">Call the LLM</div>
+        <div class="loop-box-body">
+          Send everything to GPT-4o or Claude with<br>
+          the full <strong style="color:#bc8cff">tool schema list</strong>.<br><br>
+          <code style="background:#1e1133;border:1px solid #6e3fbd;border-radius:4px;padding:2px 5px;font-size:.67rem">tool_choice="auto"</code><br>
+          LLM decides whether to answer or call tools.
+        </div>
+      </div>
+      <div class="loop-arr">→</div>
+      <div class="loop-box">
+        <div class="loop-box-icon">⚡</div>
+        <div class="loop-box-title">Execute tools (parallel)</div>
+        <div class="loop-box-body">
+          Run ALL requested tool calls at the same time using <code style="background:#1e1133;border:1px solid #6e3fbd;border-radius:4px;padding:2px 5px;font-size:.67rem">asyncio.gather()</code><br><br>
+          3 tools requested = same time as 1 tool.<br>
+          Results appended as messages.
+        </div>
+      </div>
+    </div>
+
+    <div class="loop-branch">
+      <div class="branch-box branch-yes">
+        <div class="branch-title">✅ LLM returns plain text (no tool calls)</div>
+        <div style="font-size:.7rem;margin-top:4px">Loop STOPS. Final answer sent to engineer. Conversation saved to memory.db.</div>
+      </div>
+      <div class="branch-box branch-no">
+        <div class="branch-title">🔁 LLM returns tool calls</div>
+        <div style="font-size:.7rem;margin-top:4px">Execute tools, append results, call LLM again. Repeat until no more tool calls or max 10 iterations.</div>
+      </div>
+    </div>
+
+    <div class="loop-feedback">
+      <span class="loop-feedback-arrow">↑</span>
+      <span class="loop-feedback-text">Tool results are added to the message history and the LLM reads them on the next iteration — this is how it "sees" what the device returned</span>
+      <span class="loop-feedback-arrow">↑</span>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     DISPATCHER
+══════════════════════════════════════════════ -->
+<div class="section" id="dispatcher">
+  <div class="section-title">🚦 Tool Dispatcher — routing every tool call</div>
+  <div class="section-sub">The LLM returns a tool name like <code>junos_get_bgp_summary</code>. The dispatcher figures out which Python code actually runs it.</div>
+
+  <div class="dispatch-wrap">
+    <div class="dispatch-label">TOOL DISPATCHER — adapters/devices/dispatcher.py</div>
+    <div class="dispatch-grid">
+
+      <div>
+        <div class="dispatch-col-title">LLM tool call arrives →</div>
+        <div class="route-from">
+          <div class="route-item"><span class="ri-trigger">run_playbook</span><span class="ri-desc">structured investigation</span></div>
+          <div class="route-item"><span class="ri-trigger">cisco_*</span><span class="ri-desc">e.g. cisco_get_cpu_memory</span></div>
+          <div class="route-item"><span class="ri-trigger">junos_*</span><span class="ri-desc">e.g. junos_get_bgp_summary</span></div>
+          <div class="route-item"><span class="ri-trigger">nokia_*</span><span class="ri-desc">e.g. nokia_get_chassis_health</span></div>
+          <div class="route-item"><span class="ri-trigger">jira_*</span><span class="ri-desc">LLM-initiated Jira operation</span></div>
+          <div class="route-item"><span class="ri-trigger">prometheus_*</span><span class="ri-desc">e.g. prometheus_query</span></div>
+          <div class="route-item"><span class="ri-trigger">syslog_*</span><span class="ri-desc">e.g. syslog_search_device</span></div>
+        </div>
+        <div style="margin-top:12px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:.68rem;color:var(--muted)">
+          <strong style="color:var(--yellow)">🔧 Auto-correction:</strong> If the LLM calls <code style="color:var(--cyan)">nokia_get_bgp_summary</code> on device <code style="color:var(--cyan)">pe1</code> (a Juniper device), the dispatcher automatically corrects it to <code style="color:var(--cyan)">junos_get_bgp_summary</code> before running.
+        </div>
+      </div>
+
+      <div class="dispatch-center">
+        <div class="dispatch-arr">⟶</div>
+        <div style="font-size:.6rem;color:var(--yellow);font-weight:700;margin-top:4px">routes to</div>
+      </div>
+
+      <div>
+        <div class="dispatch-col-title">→ Backend that runs it</div>
+        <div class="route-to">
+          <div class="route-target c-orange card" style="padding:9px 11px">
+            <span class="ri-icon">📋</span>
+            <div><div class="ri-name" style="color:var(--orange)">PlaybookRunner</div><div class="ri-detail">Deterministic steps + severity scoring</div></div>
+          </div>
+          <div class="route-target c-blue card" style="padding:9px 11px">
+            <span class="ri-icon">🔵</span>
+            <div><div class="ri-name" style="color:var(--blue)">cisco.py (in-process)</div><div class="ri-detail">Netmiko SSH · 18 tools</div></div>
+          </div>
+          <div class="route-target c-orange card" style="padding:9px 11px">
+            <span class="ri-icon">🟠</span>
+            <div><div class="ri-name" style="color:var(--orange)">junos.py (in-process)</div><div class="ri-detail">PyEZ NETCONF · 19 tools</div></div>
+          </div>
+          <div class="route-target c-red card" style="padding:9px 11px">
+            <span class="ri-icon">🔴</span>
+            <div><div class="ri-name" style="color:var(--red)">nokia.py (in-process)</div><div class="ri-detail">Netmiko SSH · 18 tools</div></div>
+          </div>
+          <div class="route-target c-purple card" style="padding:9px 11px">
+            <span class="ri-icon">🟣</span>
+            <div><div class="ri-name" style="color:var(--purple)">mcp-atlassian (sidecar)</div><div class="ri-detail">SSE → port 8104 · 48 Jira tools</div></div>
+          </div>
+          <div class="route-target c-green card" style="padding:9px 11px">
+            <span class="ri-icon">🟢</span>
+            <div><div class="ri-name" style="color:var(--green)">prometheus.py / syslog.py</div><div class="ri-detail">Direct httpx · 5 tools each</div></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     DEVICE ADAPTERS
+══════════════════════════════════════════════ -->
+<div class="section" id="adapters">
+  <div class="section-title">📡 Device adapters — how SSH/NETCONF works</div>
+  <div class="section-sub">Three vendors, three adapters, same pattern. All run in a thread so they don't freeze the web server.</div>
+
+  <div class="adapter-cols">
+
+    <div class="adapter-col" style="border-color:var(--blue-b)">
+      <div class="adapter-header" style="background:var(--blue-d)">
+        <div style="font-size:.85rem;font-weight:700;color:var(--blue)">🔵 Cisco IOS XR</div>
+        <div style="font-size:.7rem;color:var(--muted);margin-top:3px">18 tools · cisco_*</div>
+      </div>
+      <div class="adapter-layer"><div class="layer-label">Protocol</div><div class="layer-value" style="color:var(--blue)">Netmiko SSH</div></div>
+      <div class="adapter-layer"><div class="layer-label">Output format</div><div class="layer-value">CLI text → regex parse</div></div>
+      <div class="adapter-layer"><div class="layer-label">Credentials</div><div class="layer-value" style="font-size:.68rem"><code style="color:var(--cyan)">CISCO_USER / CISCO_PASS</code></div></div>
+      <div class="adapter-layer"><div class="layer-label">Connection</div><div class="layer-value" style="font-size:.68rem">Pool · 60 s TTL · circuit breaker</div></div>
+    </div>
+
+    <div class="adapter-col" style="border-color:var(--orange-b)">
+      <div class="adapter-header" style="background:var(--orange-d)">
+        <div style="font-size:.85rem;font-weight:700;color:var(--orange)">🟠 Juniper Junos</div>
+        <div style="font-size:.7rem;color:var(--muted);margin-top:3px">19 tools · junos_*</div>
+      </div>
+      <div class="adapter-layer"><div class="layer-label">Protocol</div><div class="layer-value" style="color:var(--orange)">PyEZ NETCONF (XML)</div></div>
+      <div class="adapter-layer"><div class="layer-label">Output format</div><div class="layer-value">Structured XML → dict</div></div>
+      <div class="adapter-layer"><div class="layer-label">Why NETCONF?</div><div class="layer-value" style="font-size:.68rem">Versioned schema, no text parsing, most reliable</div></div>
+      <div class="adapter-layer"><div class="layer-label">Credentials</div><div class="layer-value" style="font-size:.68rem"><code style="color:var(--cyan)">JUNIPER_USER / JUNIPER_PASS</code></div></div>
+    </div>
+
+    <div class="adapter-col" style="border-color:var(--red-b)">
+      <div class="adapter-header" style="background:var(--red-d)">
+        <div style="font-size:.85rem;font-weight:700;color:var(--red)">🔴 Nokia SR OS</div>
+        <div style="font-size:.7rem;color:var(--muted);margin-top:3px">18 tools · nokia_*</div>
+      </div>
+      <div class="adapter-layer"><div class="layer-label">Protocol</div><div class="layer-value" style="color:var(--red)">Netmiko SSH</div></div>
+      <div class="adapter-layer"><div class="layer-label">Output format</div><div class="layer-value">CLI text → regex parse</div></div>
+      <div class="adapter-layer"><div class="layer-label">Credentials</div><div class="layer-value" style="font-size:.68rem"><code style="color:var(--cyan)">NOKIA_USER / NOKIA_PASS</code></div></div>
+      <div class="adapter-layer"><div class="layer-label">Connection</div><div class="layer-value" style="font-size:.68rem">Pool · 60 s TTL · circuit breaker</div></div>
+    </div>
+
+  </div>
+
+  <div style="margin-top:14px;padding:14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-size:.73rem;color:var(--muted)">
+    <strong style="color:var(--text)">Why thread executor?</strong> SSH/NETCONF are blocking — they wait for the router to respond. FastAPI is async (event-driven). If blocking code ran directly in the async loop, the entire web server would freeze while waiting for the SSH response. <code>run_in_executor()</code> hands the blocking call to a separate OS thread so the event loop continues serving other requests.
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     MCP CLIENT
+══════════════════════════════════════════════ -->
+<div class="section" id="mcp">
+  <div class="section-title">🔌 MCP Client — vendor-maintained tools</div>
+  <div class="section-sub">MCP = Model Context Protocol. A standard way for LLMs to discover and call external tools without hardcoding them.</div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+
+    <div class="card c-purple">
+      <div class="card-title">Why MCP for Jira but not devices?</div>
+      <div class="card-body" style="margin-top:6px">
+        <div style="display:flex;gap:10px;margin-bottom:10px;padding:10px;background:rgba(30,17,51,.5);border-radius:6px;align-items:flex-start">
+          <span style="font-size:1.2rem;flex-shrink:0">🟣</span>
+          <div><strong style="color:var(--text)">Jira → MCP (mcp-atlassian)</strong><br>Atlassian's community built and maintains 48 Jira tools. We just connect. If they add a new Jira API, we get it for free. Zero maintenance burden.</div>
+        </div>
+        <div style="display:flex;gap:10px;padding:10px;background:rgba(30,17,51,.5);border-radius:6px;align-items:flex-start">
+          <span style="font-size:1.2rem;flex-shrink:0">📡</span>
+          <div><strong style="color:var(--text)">Devices → Direct adapters</strong><br>No official production-grade MCP server exists for Cisco IOS XR or Nokia SR OS. We control those adapters anyway — they're simple Python with no maintenance burden.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card c-purple">
+      <div class="card-title">How MCPClient.start() works at startup</div>
+      <div class="card-body" style="margin-top:6px">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(110,63,189,.3)"><span style="color:var(--purple);font-weight:700;flex-shrink:0">1.</span><span>Read <code>mcp_servers.yaml</code> — find all <code>enabled: true</code> servers</span></div>
+          <div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(110,63,189,.3)"><span style="color:var(--purple);font-weight:700;flex-shrink:0">2.</span><span>Open persistent SSE connection to each server URL</span></div>
+          <div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(110,63,189,.3)"><span style="color:var(--purple);font-weight:700;flex-shrink:0">3.</span><span>Send MCP <code>initialize</code> handshake</span></div>
+          <div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(110,63,189,.3)"><span style="color:var(--purple);font-weight:700;flex-shrink:0">4.</span><span>Call <code>list_tools()</code> — server returns all 48 tool definitions</span></div>
+          <div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(110,63,189,.3)"><span style="color:var(--purple);font-weight:700;flex-shrink:0">5.</span><span>Store prefixed: <code>jira_create_issue</code>, <code>jira_search_issues</code>…</span></div>
+          <div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0"><span style="color:var(--purple);font-weight:700;flex-shrink:0">6.</span><span>If connection drops → auto-reconnect once and retry the call</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     PLAYBOOKS
+══════════════════════════════════════════════ -->
+<div class="section" id="playbooks">
+  <div class="section-title">📋 Playbooks — deterministic investigation</div>
+  <div class="section-sub">When the LLM calls <code>run_playbook</code>, it executes a fixed sequence of diagnostic steps, scores severity, and returns structured evidence.</div>
+
+  <div class="pb-example">
+    <div class="pb-header">
+      <div class="pb-hcell">Intent</div>
+      <div class="pb-hcell">Tools called (in order)</div>
+      <div class="pb-hcell">Severity triggers</div>
+    </div>
+    <div class="pb-row">
+      <div class="pb-cell"><span class="pb-intent">link_down</span></div>
+      <div class="pb-cell pb-tools">get_interface_health · get_link_health</div>
+      <div class="pb-cell pb-severity"><span class="pill p-red">Critical if oper_status=down</span></div>
+    </div>
+    <div class="pb-row">
+      <div class="pb-cell"><span class="pb-intent">bgp_down</span></div>
+      <div class="pb-cell pb-tools">get_bgp_summary · get_bgp_neighbor_status · get_ping</div>
+      <div class="pb-cell pb-severity"><span class="pill p-red">Critical if state=Idle or Active</span></div>
+    </div>
+    <div class="pb-row">
+      <div class="pb-cell"><span class="pb-intent">isis_down</span></div>
+      <div class="pb-cell pb-tools">get_isis_health · get_isis_neighbors · get_mtu_info</div>
+      <div class="pb-cell pb-severity"><span class="pill p-red">Critical if state=Down or Init</span></div>
+    </div>
+    <div class="pb-row">
+      <div class="pb-cell"><span class="pb-intent">cpu_high</span></div>
+      <div class="pb-cell pb-tools">get_cpu_memory</div>
+      <div class="pb-cell pb-severity"><span class="pill p-yellow">Warning if cpu_percent &gt; 80</span></div>
+    </div>
+    <div class="pb-row">
+      <div class="pb-cell"><span class="pb-intent">link_flap</span></div>
+      <div class="pb-cell pb-tools">get_top_flapping_links · get_interface_health · get_interface_counters</div>
+      <div class="pb-cell pb-severity"><span class="pill p-yellow">Warning if carrier_transitions &gt; 3</span></div>
+    </div>
+    <div class="pb-row">
+      <div class="pb-cell"><span class="pb-intent">hardware_fault</span></div>
+      <div class="pb-cell pb-tools">get_chassis_health</div>
+      <div class="pb-cell pb-severity"><span class="pill p-red">Critical if chassis_alarms=active</span></div>
+    </div>
+    <div class="pb-row">
+      <div class="pb-cell"><span class="pb-intent">route_missing</span></div>
+      <div class="pb-cell pb-tools">get_route_lookup · get_bgp_route · get_isis_neighbors · get_ospf_neighbors</div>
+      <div class="pb-cell pb-severity"><span class="pill p-muted">Info (evidence-based)</span></div>
+    </div>
+  </div>
+
+  <div style="margin-top:20px">
+    <div style="font-size:.72rem;font-weight:700;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.08em">How bgp_down playbook runs on pe1</div>
+    <div class="pb-flow">
+      <div class="pb-step" style="border-color:var(--purple-b);background:var(--purple-d)">
+        <div class="pb-step-num" style="background:var(--purple-d);border-color:var(--purple-b);color:var(--purple)">1</div>
+        <div style="font-size:.7rem;font-weight:700;color:var(--purple)">run_playbook called</div>
+        <div class="pb-step-name">intent="bgp_down"<br>device="pe1"<br>neighbor="10.0.0.2"</div>
+      </div>
+      <div class="pb-flow-arr">→</div>
+      <div class="pb-step">
+        <div class="pb-step-num">2</div>
+        <div style="font-size:.7rem;font-weight:700;color:var(--text)">get_bgp_summary</div>
+        <div class="pb-step-name">auto-prefixed to<br>junos_get_bgp_summary<br>via registry lookup</div>
+      </div>
+      <div class="pb-flow-arr">→</div>
+      <div class="pb-step">
+        <div class="pb-step-num">3</div>
+        <div style="font-size:.7rem;font-weight:700;color:var(--text)">get_bgp_neighbor_status</div>
+        <div class="pb-step-name">junos_get_bgp<br>_neighbor_status<br>device+neighbor args</div>
+      </div>
+      <div class="pb-flow-arr">→</div>
+      <div class="pb-step">
+        <div class="pb-step-num">4</div>
+        <div style="font-size:.7rem;font-weight:700;color:var(--text)">get_ping</div>
+        <div class="pb-step-name">junos_get_ping<br>to neighbor IP<br>reachability check</div>
+      </div>
+      <div class="pb-flow-arr">→</div>
+      <div class="pb-step" style="border-color:var(--yellow-b);background:var(--yellow-d)">
+        <div class="pb-step-num" style="background:var(--yellow-d);border-color:var(--yellow-b);color:var(--yellow)">5</div>
+        <div style="font-size:.7rem;font-weight:700;color:var(--yellow)">Severity rules</div>
+        <div class="pb-step-name">Scan all results<br>state=Active found<br>→ CRITICAL</div>
+      </div>
+      <div class="pb-flow-arr">→</div>
+      <div class="pb-step" style="border-color:var(--green-b);background:var(--green-d)">
+        <div class="pb-step-num" style="background:var(--green-d);border-color:var(--green-b);color:var(--green)">6</div>
+        <div style="font-size:.7rem;font-weight:700;color:var(--green)">Return result</div>
+        <div class="pb-step-name">severity="Critical"<br>evidence={state,<br>last_error, flaps}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     SLACK
+══════════════════════════════════════════════ -->
+<div class="section" id="slack">
+  <div class="section-title">💬 Slack — three command paths</div>
+  <div class="section-sub">Same <code>/slack/command</code> endpoint, three completely different flows depending on what the engineer typed</div>
+
+  <div class="slack-paths">
+
+    <div class="sp-box" style="border-color:var(--blue-b)">
+      <div class="sp-header" style="background:var(--blue-d);color:var(--blue)">/noc ticket BGP down on pe1</div>
+      <div class="sp-body">
+        <div style="margin:8px 0;font-size:.68rem;color:var(--muted);padding:6px;background:var(--bg3);border-radius:4px">⚡ Fast path — NO LLM involved<br>Must respond in &lt;3s (Slack limit)</div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Slack sends POST</strong> to /slack/command with text</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Immediately return</strong> "Creating ticket..." (HTTP 200 within 3s)</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Spawn daemon thread</strong> in background</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Call jira.py directly</strong> — create_ticket(summary, description)</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>POST result</strong> to Slack response_url webhook</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Engineer sees:</strong> "Ticket created: NOC-1234"</div></div>
+      </div>
+    </div>
+
+    <div class="sp-box" style="border-color:var(--yellow-b)">
+      <div class="sp-header" style="background:var(--yellow-d);color:var(--yellow)">/noc investigate</div>
+      <div class="sp-body">
+        <div style="margin:8px 0;font-size:.68rem;color:var(--muted);padding:6px;background:var(--bg3);border-radius:4px">🤖 Full AI loop — uses latest alert from DB</div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Fetch latest alert</strong> from alerts.db for this Slack channel</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Immediately return</strong> "Investigating..." (HTTP 200)</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Background thread:</strong> run_chat("Investigate alert: device=pe1 interface=ge-0/0/1")</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Full agentic loop</strong> runs — LLM calls tools, PlaybookRunner, etc.</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Save analysis</strong> back to alerts.db (for ticket enrichment)</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>POST diagnosis</strong> to Slack channel</div></div>
+      </div>
+    </div>
+
+    <div class="sp-box" style="border-color:var(--purple-b)">
+      <div class="sp-header" style="background:var(--purple-d);color:var(--purple)">/noc why is BGP down on pe1?</div>
+      <div class="sp-body">
+        <div style="margin:8px 0;font-size:.68rem;color:var(--muted);padding:6px;background:var(--bg3);border-radius:4px">🤖 Full AI loop — plain question</div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Immediately return</strong> "Working on it..." (HTTP 200)</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Background thread:</strong> run_chat(text, user, SLACK_ROLE)</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Full agentic loop</strong> — same as browser UI</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>Conversation saved</strong> to memory.db for context</div></div>
+        <div class="sp-step"><span class="sp-arr">→</span><div class="sp-text"><strong>POST full answer</strong> to Slack channel</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     ROLES
+══════════════════════════════════════════════ -->
+<div class="section" id="roles">
+  <div class="section-title">🔐 Role-based access control</div>
+  <div class="section-sub">Three roles. Role controls which tools the LLM can see and call. Tools not in the list literally cannot be called.</div>
+
+  <div class="role-matrix">
+    <div class="rm-header">
+      <div class="rm-hcell">Capability</div>
+      <div class="rm-hcell" style="color:var(--red)">noc</div>
+      <div class="rm-hcell" style="color:var(--yellow)">noc-ticket</div>
+      <div class="rm-hcell" style="color:var(--green)">admin</div>
+    </div>
+    <div class="rm-row"><div class="rm-cell">Ask network questions (chat)</div><div class="rm-cell rm-yes">✓</div><div class="rm-cell rm-yes">✓</div><div class="rm-cell rm-yes">✓</div></div>
+    <div class="rm-row"><div class="rm-cell">Device diagnostic tools (cisco/junos/nokia_*)</div><div class="rm-cell rm-yes">✓</div><div class="rm-cell rm-yes">✓</div><div class="rm-cell rm-yes">✓</div></div>
+    <div class="rm-row"><div class="rm-cell">Prometheus metrics / Loki logs</div><div class="rm-cell rm-yes">✓</div><div class="rm-cell rm-yes">✓</div><div class="rm-cell rm-yes">✓</div></div>
+    <div class="rm-row"><div class="rm-cell">Jira ticket creation (via LLM)</div><div class="rm-cell rm-no">✗</div><div class="rm-cell rm-yes">✓</div><div class="rm-cell rm-yes">✓</div></div>
+    <div class="rm-row"><div class="rm-cell">Jira ticket creation (via /noc ticket)</div><div class="rm-cell rm-yes">✓</div><div class="rm-cell rm-yes">✓</div><div class="rm-cell rm-yes">✓</div></div>
+    <div class="rm-row"><div class="rm-cell">Change settings (/admin/settings)</div><div class="rm-cell rm-no">✗</div><div class="rm-cell rm-no">✗</div><div class="rm-cell rm-yes">✓</div></div>
+    <div class="rm-row"><div class="rm-cell">Reload device inventory</div><div class="rm-cell rm-no">✗</div><div class="rm-cell rm-no">✗</div><div class="rm-cell rm-yes">✓</div></div>
+    <div class="rm-row"><div class="rm-cell">Edit playbooks</div><div class="rm-cell rm-no">✗</div><div class="rm-cell rm-no">✗</div><div class="rm-cell rm-yes">✓</div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px">
+    <div class="card" style="border-color:var(--border)">
+      <div class="card-title">Where roles come from</div>
+      <div class="card-body" style="margin-top:6px">
+        <div style="display:flex;gap:8px;margin-bottom:6px"><span class="pill p-blue">Browser</span> Auth0 JWT claim in session cookie</div>
+        <div style="display:flex;gap:8px;margin-bottom:6px"><span class="pill p-cyan">API</span> <code>X-API-Key</code> header → <code>key:role</code> map</div>
+        <div style="display:flex;gap:8px;margin-bottom:6px"><span class="pill p-muted">Slack</span> Fixed <code>SLACK_ROLE</code> setting</div>
+        <div style="display:flex;gap:8px"><span class="pill p-muted">Teams</span> Fixed <code>TEAMS_ROLE</code> setting</div>
+      </div>
+    </div>
+    <div class="card c-yellow" style="grid-column:span 2">
+      <div class="card-title">How role gates tools</div>
+      <div class="card-body" style="margin-top:6px">
+        <code>dispatcher.get_all_tools(role)</code> builds the tool list passed to the LLM. A <code>noc</code> user's list never contains Jira creation tools. The LLM cannot call what it cannot see — it would have to hallucinate a tool name that isn't in its schema list, which would be rejected by the dispatcher as "unknown tool."
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     ALERT PIPELINE
+══════════════════════════════════════════════ -->
+<div class="section" id="alerts">
+  <div class="section-title">🔔 Alert pipeline — from alarm to Jira ticket</div>
+  <div class="section-sub">External monitoring fires an alert → engineer investigates with AI → ticket auto-created with findings</div>
+
+  <div class="trace-wrap">
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--red)">🔴 Prometheus<br>Alertmanager</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-red">POST /alerts/ingest</span> <code>{"text":"Interface ge-0/0/1 down","device":"pe1","severity":"critical"}</code></div>
+        <div class="tc-detail">Token verified → alert saved to alerts.db keyed by Slack channel ID</div>
+      </div>
+    </div>
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--blue)">💬 NetCopilot<br>→ Slack</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-blue">Slack notification</span> "ALERT: Interface ge-0/0/1 down on pe1. Run /netcopilot investigate."</div>
+        <div class="tc-detail">Posted to configured alert channel automatically</div>
+      </div>
+    </div>
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--yellow)">👤 Engineer<br>(Slack)</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-yellow">types: /noc investigate</span></div>
+        <div class="tc-detail">App fetches latest alert from alerts.db for this channel → sends to full AI agentic loop</div>
+      </div>
+    </div>
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--purple)">🤖 AI loop</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-purple">PlaybookRunner: link_down</span> → get_interface_health → get_link_health → severity=Critical</div>
+        <div class="tc-detail">Analysis saved back to alerts.db as source="analysis" for same channel</div>
+      </div>
+    </div>
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--yellow)">👤 Engineer<br>(Slack)</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-yellow">types: /noc ticket</span></div>
+        <div class="tc-detail">App fetches latest alert + latest analysis from alerts.db → builds ticket payload</div>
+      </div>
+    </div>
+    <div class="trace-row" style="border-bottom:none">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--green)">🎫 Jira</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-green">Ticket created: NOC-1234</span></div>
+        <div class="tc-detail">Summary: "Interface ge-0/0/1 down on pe1" · Description includes device details + full AI investigation · Priority: Critical</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     DOCKER
+══════════════════════════════════════════════ -->
+<div class="section" id="docker">
+  <div class="section-title">🐳 Docker deployment</div>
+  <div class="section-sub">Two containers. Start with <code>docker-compose up -d</code>.</div>
+
+  <div class="docker-wrap">
+    <div class="docker-header">🐳 docker-compose.yml — production deployment</div>
+    <div class="docker-body">
+
+      <div class="container-box" style="border-color:var(--green-b)">
+        <div class="container-name" style="color:var(--green)">app</div>
+        <div class="container-image">netcopilot:latest · port 8001</div>
+        <div class="container-detail">
+          <div>Built from <code>Dockerfile.prod</code></div>
+          <div>All credentials via env vars from <code>.env</code></div>
+          <div>Waits for jira-mcp to be healthy before starting</div>
+          <div>Healthcheck: <code>curl /health</code> every 30s</div>
+          <div>Sets <code>JIRA_MCP_URL=http://jira-mcp:8104/sse</code></div>
+        </div>
+      </div>
+
+      <div class="container-box" style="border-color:var(--purple-b)">
+        <div class="container-name" style="color:var(--purple)">jira-mcp (sidecar)</div>
+        <div class="container-image">ghcr.io/sooperset/mcp-atlassian:latest · port 8104</div>
+        <div class="container-detail">
+          <div>Vendor-maintained — Atlassian community</div>
+          <div>SSE transport, exposes 48 Jira tools</div>
+          <div>We never modify this image</div>
+          <div>Healthcheck: <code>curl /sse</code> every 30s</div>
+          <div>New Jira features → just pull latest image</div>
+        </div>
+      </div>
+
+      <div class="docker-volumes">
+        <div class="vol-title">📦 Persistent volumes (data survives container restarts)</div>
+        <div class="vol-row"><span class="vol-name">netcopilot_data</span><span style="color:var(--muted)">All SQLite databases: settings.db, memory.db, alerts.db, playbooks.db</span></div>
+        <div class="vol-row"><span class="vol-name">netcopilot_logs</span><span style="color:var(--muted)">Rotating log files: netcopilot.log, audit.log (with redaction)</span></div>
+        <div class="vol-row"><span class="vol-name">./devices.yaml</span><span style="color:var(--muted)">Mounted read-only from host. Edit on host → hit /admin/reload-inventory</span></div>
+        <div class="vol-row"><span class="vol-name">./playbooks/playbooks.yaml</span><span style="color:var(--muted)">Mounted read-only. Edit on host → changes picked up on next playbook call</span></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     SAFETY
+══════════════════════════════════════════════ -->
+<div class="section" id="safety">
+  <div class="section-title">🛡️ Read-only safety — 3 independent layers</div>
+  <div class="section-sub">All three layers must be independently bypassed for any configuration change to be possible. In practice: impossible without modifying source code.</div>
+
+  <div class="safety-layers">
+    <div class="sl-row">
+      <div class="sl-num">1</div>
+      <div class="sl-content">
+        <div class="sl-title">System prompt instruction</div>
+        <div class="sl-body">The LLM is instructed in <code>llm/prompts.py</code> that it performs read and diagnostic operations only. It will decline requests like "shut down this interface" and offer to create a change ticket instead. This is baked into its instructions before every conversation.</div>
+      </div>
+    </div>
+    <div class="sl-row">
+      <div class="sl-num">2</div>
+      <div class="sl-content">
+        <div class="sl-title">_is_config_request() regex check — runs before the LLM is even called</div>
+        <div class="sl-body">In <code>_run_chat()</code>, the user's message is tested against a regex <em>before</em> any LLM call. If the message contains configure, apply, commit, rollback, shutdown, no shutdown, set, delete, modify, etc., the function returns a refusal immediately — the LLM and all adapters are never invoked.</div>
+        <div class="sl-code">re.compile(r"\b(configure|apply|commit|rollback|shutdown|set\s+|delete\s+|modify\s+)\b")</div>
+      </div>
+    </div>
+    <div class="sl-row">
+      <div class="sl-num">3</div>
+      <div class="sl-content">
+        <div class="sl-title">Tool schema design — write tools simply do not exist</div>
+        <div class="sl-body">None of the functions in <code>cisco.py</code>, <code>junos.py</code>, or <code>nokia.py</code> accept write commands. There is no <code>push_config()</code>, <code>commit_changes()</code>, or <code>apply_config()</code> function. Even if the LLM tried to invent a tool name, the dispatcher would return <code>{"error": "Unknown tool"}</code>.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     FULL TRACE
+══════════════════════════════════════════════ -->
+<div class="section" id="trace">
+  <div class="section-title">🔍 Full trace — "Why is BGP down on pe1?"</div>
+  <div class="section-sub">Follow one question end-to-end through every layer of the system</div>
+
+  <div class="trace-wrap">
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--blue)">👤 Engineer<br>Slack</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-blue">message</span> <em>"BGP to pe2 is down, what's going on?"</em></div>
+        <div class="tc-detail">Slack sends POST /slack/command with form-encoded body</div>
+      </div>
+    </div>
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--green)">⚙️ FastAPI<br>app.py</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-green">auth</span> HMAC-SHA256 signature verified. Role = noc (from SLACK_ROLE setting)</div>
+        <div class="tc-detail">Returns "Working on it..." immediately. Spawns daemon thread for background processing.</div>
+      </div>
+    </div>
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--green)">⚙️ _run_chat<br>app.py</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-green">build</span> Assembles: system prompt + last 12 turns from memory.db + user message</div>
+        <div class="tc-detail">Calls dispatcher.get_all_tools("noc") → 55 tool schemas. No Jira creation tools (role=noc).</div>
+      </div>
+    </div>
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--purple)">🧠 LLM<br>iteration 1</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-purple">tool call</span> <code>junos_get_bgp_neighbor_status</code> → <code>{"device":"pe1","neighbor":"10.0.0.2"}</code></div>
+        <div class="tc-detail">LLM read the system prompt: "pe1 is vendor=junos" → picked the junos_ prefix tool automatically</div>
+      </div>
+    </div>
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--yellow)">🚦 Dispatcher</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-yellow">route</span> prefix=junos → junos.py → PyEZ NETCONF → pe1 (66.129.234.213:33045)</div>
+        <div class="tc-detail">Returns: <code>{"state":"Active","last_error":"Hold timer expired","last_reset":"00:03:12","flaps":2}</code></div>
+      </div>
+    </div>
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--purple)">🧠 LLM<br>iteration 2</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-purple">tool call</span> <code>run_playbook</code> → <code>{"intent":"bgp_down","device":"pe1","neighbor":"10.0.0.2"}</code></div>
+        <div class="tc-detail">LLM decided state=Active warrants a full diagnostic playbook</div>
+      </div>
+    </div>
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--orange)">📋 Playbook<br>Runner</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-orange">bgp_down playbook</span> step 1: get_bgp_summary → step 2: get_bgp_neighbor_status → step 3: get_ping</div>
+        <div class="tc-detail">Each step auto-prefixed "junos_" via call_tool_unprefixed() → registry lookup → real NETCONF calls<br>Severity rules: state=Active → <strong style="color:var(--red)">CRITICAL</strong><br>Returns: <code>{"severity":"Critical","evidence":{"state":"Active","last_error":"Hold timer expired","flaps":2}}</code></div>
+      </div>
+    </div>
+    <div class="trace-row">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--purple)">🧠 LLM<br>final</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-purple">plain text reply</span> No more tool calls — writes the diagnosis</div>
+        <div class="tc-detail" style="color:var(--text);font-style:italic">"BGP to pe2 is Critical. The session has been in Active state for 3 minutes — it is trying to connect but failing. Last error: Hold timer expired (3 flaps). This typically means MTU mismatch or an authentication failure between pe1 and pe2. Recommended next steps: 1) Check MTU on both sides of the link. 2) Verify BGP authentication keys match. 3) Check for packet loss using traceroute to 10.0.0.2."</div>
+      </div>
+    </div>
+    <div class="trace-row" style="border-bottom:none">
+      <div class="trace-actor"><div class="ta-label" style="color:var(--blue)">👤 Engineer<br>Slack</div></div>
+      <div class="trace-content">
+        <div class="tc-msg"><span class="pill p-blue">response</span> Full diagnosis posted to Slack channel. Conversation saved to memory.db.</div>
+        <div class="tc-detail">Engineer can follow up with "/noc ticket" to create a Jira ticket pre-filled with this analysis</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+</div><!-- end .page -->
+</body>
+</html>

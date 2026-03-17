@@ -1,0 +1,135 @@
+- name: Interface down/down
+  intent: link_down
+  tools:
+    - get_interface_health
+    - get_link_health
+  evidence_fields:
+    - admin_status
+    - oper_status
+    - last_flapped
+    - active_alarms
+    - active_defects
+    - input_errors
+    - output_errors
+  severity_rules:
+    critical:
+      - oper_status=down
+      - admin_status=up
+  vendor_hints:
+    junos: "show interfaces <if> extensive"
+    iosxr: "show interface <if>"
+    sros: "show port <port> detail"
+
+- name: Interface flapping
+  intent: link_flap
+  tools:
+    - get_top_flapping_links
+    - get_interface_health
+    - get_interface_counters
+  evidence_fields:
+    - last_flapped
+    - carrier_transitions
+    - crc_errors
+    - input_errors
+    - output_errors
+  severity_rules:
+    warning:
+      - carrier_transitions>3
+
+- name: High errors / CRC
+  intent: crc_errors
+  tools:
+    - get_interface_health
+    - get_interface_counters
+    - get_optics
+  evidence_fields:
+    - crc_errors
+    - input_errors
+    - output_errors
+    - rx_power_dbm
+    - tx_power_dbm
+  severity_rules:
+    warning:
+      - crc_errors>0
+
+- name: BGP neighbor down
+  intent: bgp_down
+  tools:
+    - get_bgp_summary
+    - get_bgp_neighbor_status
+    - get_ping
+  evidence_fields:
+    - state
+    - last_error
+    - last_event
+    - flaps
+  severity_rules:
+    critical:
+      - state=Idle
+      - state=Active
+
+- name: BGP neighbor Active/Idle
+  intent: bgp_active
+  tools:
+    - get_bgp_summary
+    - get_bgp_neighbor_status
+    - get_route_lookup
+    - get_ping
+  evidence_fields:
+    - state
+    - last_error
+    - last_event
+    - flaps
+
+- name: ISIS adjacency down
+  intent: isis_down
+  tools:
+    - get_isis_health
+    - get_isis_neighbors
+    - get_mtu_info
+  evidence_fields:
+    - state
+    - hold
+    - mtu
+    - isis_log
+  severity_rules:
+    critical:
+      - state=Down
+      - state=Init
+
+- name: Routing missing
+  intent: route_missing
+  tools:
+    - get_route_lookup
+    - get_bgp_route
+    - get_isis_neighbors
+    - get_ospf_neighbors
+  evidence_fields:
+    - routes
+    - has_default_route
+
+- name: High CPU / memory
+  intent: cpu_high
+  tools:
+    - get_cpu_memory
+  evidence_fields:
+    - cpu_percent
+    - memory_percent
+  severity_rules:
+    warning:
+      - cpu_percent>80
+      - memory_percent>80
+
+- name: Chassis/PIC/FPC issue
+  intent: hardware_fault
+  tools:
+    - get_chassis_health
+  evidence_fields:
+    - fpcs
+    - pics
+    - chassis_alarms
+    - system_alarms
+  severity_rules:
+    critical:
+      - chassis_alarms=active
+      - system_alarms=active

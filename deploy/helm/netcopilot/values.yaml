@@ -1,0 +1,87 @@
+image:
+  repository: netcopilot
+  tag: prod
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8001
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: netcopilot.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: netcopilot-tls
+      hosts:
+        - netcopilot.example.com
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClassName: ""
+
+config:
+  LOG_LEVEL: INFO
+  RATE_LIMIT_PER_MIN: "120"
+  DEVICE_REGISTRY_PATH: /app/devices.yaml
+  LLM_PROVIDER: openai
+  OPENAI_MODEL: gpt-4.1-mini
+
+secrets:
+  OPENAI_API_KEY: ""
+  CISCO_USER: ""
+  CISCO_PASS: ""
+  JUNIPER_USER: ""
+  JUNIPER_PASS: ""
+  NOKIA_USER: ""
+  NOKIA_PASS: ""
+  SESSION_SECRET: ""
+  SLACK_BOT_TOKEN: ""
+  SLACK_SIGNING_SECRET: ""
+  SLACK_VERIFICATION_TOKEN: ""
+  JIRA_BASE_URL: ""
+  JIRA_EMAIL: ""
+  JIRA_API_TOKEN: ""
+  JIRA_PROJECT_KEY: ""
+  JIRA_DEFAULT_ISSUE_TYPE: "Task"
+  JIRA_DEFAULT_PRIORITY: "Medium"
+  JIRA_DEFAULT_TEAM: "NOC"
+  ALERT_INGEST_TOKEN: ""
+
+inventory:
+  cisco_devices: {}
+  juniper_devices: {}
+  nokia_devices: {}
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  ingressNamespace: ingress-nginx
+
+serviceAccount:
+  create: true
+  name: ""

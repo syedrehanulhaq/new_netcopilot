@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NetCopilot — Architecture &amp; Flow</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --bg2: #161b22;
+      --bg3: #1c2128;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #7d8590;
+      --blue: #388bfd;
+      --blue-bg: #0d2044;
+      --purple: #bc8cff;
+      --purple-bg: #1e1133;
+      --green: #3fb950;
+      --green-bg: #0d2a16;
+      --yellow: #d29922;
+      --yellow-bg: #2a1c00;
+      --orange: #f0883e;
+      --orange-bg: #2a1200;
+      --teal: #39d353;
+      --red: #f85149;
+      --cyan: #79c0ff;
+    }
+
+    body {
+      font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 32px 24px 60px;
+      line-height: 1.5;
+    }
+
+    /* ── Typography ── */
+    h1 { font-size: 1.5rem; font-weight: 700; text-align: center; color: #f0f6fc; margin-bottom: 4px; }
+    .tagline { text-align: center; color: var(--muted); font-size: 0.82rem; margin-bottom: 40px; }
+    h2 { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 10px; }
+    h3 { font-size: 0.95rem; font-weight: 700; color: #f0f6fc; }
+
+    /* ── Shared card ── */
+    .box {
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      padding: 14px 16px;
+    }
+    .box-title {
+      font-weight: 700;
+      font-size: 0.85rem;
+      margin-bottom: 5px;
+    }
+    .box-body {
+      font-size: 0.75rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .box-body code {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 0.72rem;
+      color: var(--cyan);
+    }
+
+    /* coloured variants */
+    .box-blue   { background: var(--blue-bg);   border-color: #1f4e91; }
+    .box-purple { background: var(--purple-bg); border-color: #6e3fbd; }
+    .box-green  { background: var(--green-bg);  border-color: #1a5c2a; }
+    .box-yellow { background: var(--yellow-bg); border-color: #5a3d00; }
+    .box-orange { background: var(--orange-bg); border-color: #5a2a00; }
+
+    .box-blue   .box-title { color: var(--blue);   }
+    .box-purple .box-title { color: var(--purple);  }
+    .box-green  .box-title { color: var(--green);   }
+    .box-yellow .box-title { color: var(--yellow);  }
+    .box-orange .box-title { color: var(--orange);  }
+
+    /* ── Pill badge ── */
+    .pill {
+      display: inline-block;
+      border-radius: 20px;
+      padding: 1px 8px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      border: 1px solid;
+      margin: 2px 2px 0;
+    }
+    .pill-blue   { color: var(--blue);   border-color: #1f4e91; background: #0a1b36; }
+    .pill-purple { color: var(--purple); border-color: #6e3fbd; background: #160c2a; }
+    .pill-green  { color: var(--green);  border-color: #1a5c2a; background: #071810; }
+    .pill-yellow { color: var(--yellow); border-color: #5a3d00; background: #1a1200; }
+    .pill-orange { color: var(--orange); border-color: #5a2a00; background: #1a0c00; }
+    .pill-muted  { color: var(--muted);  border-color: var(--border); background: var(--bg3); }
+
+    /* ══════════════════════════════════════════════
+       SECTION 1: Overview strip
+    ══════════════════════════════════════════════ */
+    .overview-strip {
+      display: flex;
+      gap: 12px;
+      max-width: 1080px;
+      margin: 0 auto 40px;
+      flex-wrap: wrap;
+    }
+    .overview-strip .box { flex: 1; min-width: 180px; }
+
+    /* ══════════════════════════════════════════════
+       SECTION 2: Main flow diagram
+    ══════════════════════════════════════════════ */
+    .main-flow {
+      max-width: 1080px;
+      margin: 0 auto 40px;
+    }
+
+    /* ── Flow step row ── */
+    .flow-row {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 16px;
+      margin-bottom: 4px;
+      align-items: start;
+    }
+    .flow-label {
+      text-align: right;
+      padding-top: 14px;
+      padding-right: 12px;
+    }
+    .flow-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      font-size: 0.75rem;
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-right: 6px;
+    }
+    .flow-step-name {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    .arrow-down-wrap {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 16px;
+      height: 32px;
+    }
+    .arrow-down-line {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      padding-left: 24px;
+      position: relative;
+    }
+    .arrow-down-line::before {
+      content: '';
+      display: block;
+      width: 2px;
+      height: 100%;
+      background: linear-gradient(to bottom, #30363d, #21262d);
+      margin-left: 12px;
+    }
+    .arrow-down-line .arrow-tip {
+      position: absolute;
+      bottom: -6px;
+      left: 30px;
+      font-size: 10px;
+      color: #30363d;
+    }
+    .arrow-label-text {
+      position: absolute;
+      left: 36px;
+      top: 6px;
+      font-size: 0.65rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    /* ══════════════════════════════════════════════
+       AGENTIC LOOP visual
+    ══════════════════════════════════════════════ */
+    .loop-section {
+      max-width: 1080px;
+      margin: 0 auto 40px;
+    }
+    .loop-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0;
+      border: 2px solid #6e3fbd;
+      border-radius: 12px;
+      background: var(--purple-bg);
+      padding: 20px;
+      position: relative;
+    }
+    .loop-container::before {
+      content: '🔄  AGENTIC AI LOOP  —  repeats until LLM is done asking for tools';
+      position: absolute;
+      top: -13px; left: 20px;
+      background: var(--purple-bg);
+      padding: 0 10px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--purple);
+      letter-spacing: 0.04em;
+    }
+
+    .loop-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 12px 8px;
+      position: relative;
+    }
+    .loop-step:not(:last-child)::after {
+      content: '→';
+      position: absolute;
+      right: -12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--purple);
+      font-size: 1.2rem;
+    }
+    .loop-icon {
+      font-size: 1.8rem;
+      margin-bottom: 8px;
+    }
+    .loop-step-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--purple);
+      margin-bottom: 4px;
+    }
+    .loop-step-body {
+      font-size: 0.7rem;
+      color: #9775fa;
+      line-height: 1.5;
+    }
+
+    .loop-feedback {
+      text-align: center;
+      color: var(--purple);
+      font-size: 0.7rem;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid #2d1d4a;
+    }
+
+    /* ══════════════════════════════════════════════
+       DISPATCHER routing
+    ══════════════════════════════════════════════ */
+    .dispatch-section {
+      max-width: 1080px;
+      margin: 0 auto 40px;
+    }
+    .dispatch-box {
+      border: 2px solid #5a3d00;
+      border-radius: 12px;
+      background: var(--yellow-bg);
+      padding: 20px;
+      position: relative;
+    }
+    .dispatch-box::before {
+      content: '🚦  TOOL DISPATCHER  —  routes every LLM tool call to the right backend';
+      position: absolute;
+      top: -13px; left: 20px;
+      background: var(--yellow-bg);
+      padding: 0 10px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--yellow);
+      letter-spacing: 0.04em;
+    }
+
+    .dispatch-grid {
+      display: grid;
+      grid-template-columns: 1fr 40px 1fr;
+      gap: 0;
+      align-items: start;
+    }
+    .dispatch-input { display: flex; flex-direction: column; gap: 8px; }
+    .dispatch-output { display: flex; flex-direction: column; gap: 8px; }
+    .dispatch-center {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      flex-direction: column;
+      gap: 4px;
+      color: var(--yellow);
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .route-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .route-trigger {
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: var(--cyan);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .route-arrow { color: var(--yellow); font-size: 0.9rem; flex-shrink: 0; }
+    .route-desc { font-size: 0.72rem; color: var(--muted); }
+    .route-target {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .target-icon { font-size: 1.2rem; flex-shrink: 0; }
+    .target-name { font-size: 0.8rem; font-weight: 700; }
+    .target-detail { font-size: 0.68rem; color: var(--muted); margin-top: 2px; }
+
+    /* ══════════════════════════════════════════════
+       BACKENDS section
+    ══════════════════════════════════════════════ */
+    .backends-section {
+      max-width: 1080px;
+      margin: 0 auto 40px;
+    }
+    .backends-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr) repeat(2, 1fr);
+      gap: 10px;
+    }
+    .backend-card {
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      padding: 12px;
+      text-align: center;
+    }
+    .backend-icon { font-size: 1.4rem; margin-bottom: 6px; }
+    .backend-name { font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; }
+    .backend-proto { font-size: 0.68rem; color: var(--muted); }
+
+    /* ══════════════════════════════════════════════
+       EXAMPLE flow trace
+    ══════════════════════════════════════════════ */
+    .trace-section {
+      max-width: 1080px;
+      margin: 0 auto 40px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+    }
+    .trace-section h3 { margin-bottom: 4px; }
+    .trace-subtitle { font-size: 0.75rem; color: var(--muted); margin-bottom: 20px; }
+    .trace-steps { display: flex; flex-direction: column; gap: 0; }
+    .trace-row {
+      display: flex;
+      gap: 0;
+      align-items: stretch;
+    }
+    .trace-left {
+      width: 180px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding: 10px 14px;
+      border-right: 2px solid var(--border);
+    }
+    .trace-actor {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-align: right;
+    }
+    .trace-right {
+      flex: 1;
+      padding: 10px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      border-bottom: 1px solid #1c2128;
+    }
+    .trace-msg { font-size: 0.78rem; }
+    .trace-detail { font-size: 0.68rem; color: var(--muted); }
+
+    /* ══════════════════════════════════════════════
+       JIRA dual path
+    ══════════════════════════════════════════════ */
+    .jira-section {
+      max-width: 1080px;
+      margin: 0 auto 40px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .jira-path {
+      border-radius: 10px;
+      border: 1px solid;
+      padding: 16px;
+    }
+    .jira-path-a { background: var(--purple-bg); border-color: #6e3fbd; }
+    .jira-path-b { background: var(--blue-bg);   border-color: #1f4e91; }
+    .jira-path h3 { font-size: 0.82rem; margin-bottom: 8px; }
+    .jira-path-a h3 { color: var(--purple); }
+    .jira-path-b h3 { color: var(--blue); }
+    .jira-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .jira-arrow { color: var(--muted); font-size: 0.8rem; flex-shrink: 0; margin-top: 2px; }
+    .jira-step-text { font-size: 0.72rem; color: var(--muted); line-height: 1.5; }
+    .jira-step-text strong { color: var(--text); }
+
+    /* ══════════════════════════════════════════════
+       SECTION HEADER
+    ══════════════════════════════════════════════ */
+    .section-header {
+      max-width: 1080px;
+      margin: 0 auto 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section-header h2 { margin: 0; }
+    .section-line { flex: 1; height: 1px; background: var(--border); }
+
+    /* ══════════════════════════════════════════════
+       LAYOUT: top-level request path
+    ══════════════════════════════════════════════ */
+    .request-path {
+      max-width: 1080px;
+      margin: 0 auto 40px;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0;
+      align-items: center;
+    }
+    .rp-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+      position: relative;
+    }
+    .rp-box::after {
+      content: '→';
+      position: absolute;
+      right: -16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-size: 1rem;
+      z-index: 1;
+    }
+    .rp-box:last-child::after { display: none; }
+    .rp-icon { font-size: 1.5rem; margin-bottom: 4px; }
+    .rp-name { font-size: 0.75rem; font-weight: 700; }
+    .rp-detail { font-size: 0.65rem; color: var(--muted); margin-top: 2px; }
+    .rp-gap { width: 32px; }
+
+    @media (max-width: 700px) {
+      .request-path { grid-template-columns: 1fr; }
+      .loop-container { grid-template-columns: 1fr; }
+      .dispatch-grid { grid-template-columns: 1fr; }
+      .jira-section { grid-template-columns: 1fr; }
+      .rp-box::after { display: none; }
+      .loop-step::after { display: none; }
+      .backends-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<h1>NetCopilot</h1>
+<p class="tagline">AI-powered NOC assistant · FastAPI + LLM + MCP · Multi-vendor network operations</p>
+
+<!-- ══════════════════════════════════════════════
+     TOP: Big picture request path
+══════════════════════════════════════════════ -->
+<div class="section-header">
+  <h2>Big picture — how a request flows</h2>
+  <div class="section-line"></div>
+</div>
+
+<div class="request-path" style="grid-template-columns: 1fr 28px 1fr 28px 1fr 28px 1fr 28px 1fr; gap:0; align-items:center;">
+  <div class="rp-box box-blue">
+    <div class="rp-icon">👤</div>
+    <div class="rp-name">You</div>
+    <div class="rp-detail">Browser · Slack · Alerts</div>
+  </div>
+  <div style="text-align:center; color:var(--muted); font-size:1.1rem;">→</div>
+
+  <div class="rp-box box-green">
+    <div class="rp-icon">🔐</div>
+    <div class="rp-name">FastAPI</div>
+    <div class="rp-detail">Auth + routing</div>
+  </div>
+  <div style="text-align:center; color:var(--muted); font-size:1.1rem;">→</div>
+
+  <div class="rp-box box-purple">
+    <div class="rp-icon">🤖</div>
+    <div class="rp-name">AI Loop</div>
+    <div class="rp-detail">Thinks + picks tools</div>
+  </div>
+  <div style="text-align:center; color:var(--muted); font-size:1.1rem;">→</div>
+
+  <div class="rp-box box-yellow">
+    <div class="rp-icon">🚦</div>
+    <div class="rp-name">Dispatcher</div>
+    <div class="rp-detail">Routes to right backend</div>
+  </div>
+  <div style="text-align:center; color:var(--muted); font-size:1.1rem;">→</div>
+
+  <div class="rp-box" style="background:#0d1f20; border-color:#1a5c4a;">
+    <div class="rp-icon">📡</div>
+    <div class="rp-name">Device / Service</div>
+    <div class="rp-detail">Cisco · Junos · Nokia · Jira…</div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     AGENTIC AI LOOP
+══════════════════════════════════════════════ -->
+<div class="section-header" style="margin-top: 8px;">
+  <h2>What is the Agentic AI Loop?</h2>
+  <div class="section-line"></div>
+  <span style="font-size:0.7rem; color:var(--muted); white-space:nowrap;">The AI keeps looping until it has enough data to answer</span>
+</div>
+
+<div class="loop-section">
+  <div class="loop-container">
+
+    <div class="loop-step">
+      <div class="loop-icon">💬</div>
+      <div class="loop-step-title">1 · You send a message</div>
+      <div class="loop-step-body">
+        <em>"Is BGP to pe2 healthy?"</em><br><br>
+        FastAPI forwards it to the LLM together with:<br>
+        • full conversation history<br>
+        • list of available tools<br>
+        • device inventory
+      </div>
+    </div>
+
+    <div class="loop-step">
+      <div class="loop-icon">🧠</div>
+      <div class="loop-step-title">2 · AI decides what to check</div>
+      <div class="loop-step-body">
+        LLM returns a <strong>tool call</strong> instead of plain text:<br><br>
+        <code style="background:#160c2a; border:1px solid #6e3fbd; border-radius:4px; padding:2px 6px; font-size:0.68rem; color:#bc8cff;">
+          junos_get_bgp_summary<br>{"device": "pe1"}
+        </code><br><br>
+        It picked the right tool from the list — it was <em>not</em> told to use it.
+      </div>
+    </div>
+
+    <div class="loop-step">
+      <div class="loop-icon">🔁</div>
+      <div class="loop-step-title">3 · Result goes back → loop</div>
+      <div class="loop-step-body">
+        Dispatcher runs the tool on the real device.<br>
+        The output is appended to the conversation.<br>
+        LLM is called <strong>again</strong>.<br><br>
+        → If it needs more data, it calls another tool.<br>
+        → If it has enough, it writes the final answer.
+      </div>
+    </div>
+
+  </div>
+  <div class="loop-feedback">
+    ↑ Tool result goes back to the LLM as a message &nbsp;·&nbsp; loop repeats until LLM returns plain text with no tool calls &nbsp;·&nbsp; typically 1–4 iterations per question ↑
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     TOOL DISPATCHER
+══════════════════════════════════════════════ -->
+<div class="section-header">
+  <h2>What does the Tool Dispatcher do?</h2>
+  <div class="section-line"></div>
+  <span style="font-size:0.7rem; color:var(--muted); white-space:nowrap;">Routes every tool call name to the right Python code</span>
+</div>
+
+<div class="dispatch-section">
+  <div class="dispatch-box">
+    <div class="dispatch-grid">
+
+      <!-- Left: what comes IN -->
+      <div class="dispatch-input">
+        <div style="font-size:0.7rem; font-weight:700; color:var(--yellow); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.08em;">LLM tool call arrives →</div>
+
+        <div class="route-item">
+          <span class="route-trigger">run_playbook</span>
+          <span class="route-desc">runs diagnostic sequence</span>
+        </div>
+        <div class="route-item">
+          <span class="route-trigger">cisco_*</span>
+          <span class="route-desc">e.g. cisco_get_bgp_summary</span>
+        </div>
+        <div class="route-item">
+          <span class="route-trigger">junos_*</span>
+          <span class="route-desc">e.g. junos_get_interface_health</span>
+        </div>
+        <div class="route-item">
+          <span class="route-trigger">nokia_*</span>
+          <span class="route-desc">e.g. nokia_get_cpu_memory</span>
+        </div>
+        <div class="route-item">
+          <span class="route-trigger">jira_*</span>
+          <span class="route-desc">e.g. jira_create_ticket</span>
+        </div>
+        <div class="route-item">
+          <span class="route-trigger">prometheus_*</span>
+          <span class="route-desc">e.g. prometheus_query</span>
+        </div>
+        <div class="route-item">
+          <span class="route-trigger">syslog_*</span>
+          <span class="route-desc">e.g. syslog_search_device</span>
+        </div>
+        <div style="font-size:0.68rem; color:var(--muted); margin-top:6px; padding-left:4px;">
+          ⚡ Bonus: if the LLM calls <code>nokia_get_bgp_summary</code> on a Cisco device,<br>
+          the dispatcher auto-corrects the prefix to <code>cisco_get_bgp_summary</code>.
+        </div>
+      </div>
+
+      <!-- Center: arrow -->
+      <div class="dispatch-center">
+        <div style="font-size:1.8rem; color:var(--yellow);">⟶</div>
+        <div style="margin-top:6px; font-size:0.6rem; color:var(--yellow); font-weight:700;">routes to</div>
+      </div>
+
+      <!-- Right: destinations -->
+      <div class="dispatch-output">
+        <div style="font-size:0.7rem; font-weight:700; color:var(--yellow); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.08em;">→ Backend that runs it</div>
+
+        <div class="route-target">
+          <div class="target-icon">📋</div>
+          <div>
+            <div class="target-name" style="color:#f0883e;">PlaybookRunner</div>
+            <div class="target-detail">Fixed diagnostic steps, severity scoring (Critical/Warning/Info)</div>
+          </div>
+        </div>
+        <div class="route-target">
+          <div class="target-icon">🔵</div>
+          <div>
+            <div class="target-name" style="color:var(--blue);">cisco.py (direct adapter)</div>
+            <div class="target-detail">Netmiko SSH · 18 tools</div>
+          </div>
+        </div>
+        <div class="route-target">
+          <div class="target-icon">🟠</div>
+          <div>
+            <div class="target-name" style="color:var(--orange);">junos.py (direct adapter)</div>
+            <div class="target-detail">PyEZ NETCONF · 19 tools</div>
+          </div>
+        </div>
+        <div class="route-target">
+          <div class="target-icon">🔴</div>
+          <div>
+            <div class="target-name" style="color:#f85149;">nokia.py (direct adapter)</div>
+            <div class="target-detail">Netmiko SSH · 18 tools</div>
+          </div>
+        </div>
+        <div class="route-target">
+          <div class="target-icon">🟣</div>
+          <div>
+            <div class="target-name" style="color:var(--purple);">mcp-atlassian (vendor MCP)</div>
+            <div class="target-detail">48 Jira tools · SSE sidecar :8104 · Atlassian-maintained</div>
+          </div>
+        </div>
+        <div class="route-target">
+          <div class="target-icon">🟢</div>
+          <div>
+            <div class="target-name" style="color:var(--green);">prometheus.py / syslog.py</div>
+            <div class="target-detail">Direct httpx · Prometheus PromQL · Loki LogQL</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     EXAMPLE TRACE
+══════════════════════════════════════════════ -->
+<div class="section-header">
+  <h2>Full example — "Is BGP down on pe1?"</h2>
+  <div class="section-line"></div>
+</div>
+
+<div class="trace-section">
+  <p class="trace-subtitle">Watch the agentic loop + dispatcher in action. The LLM makes two tool calls before answering.</p>
+
+  <div class="trace-steps">
+
+    <div class="trace-row">
+      <div class="trace-left"><div class="trace-actor" style="color:var(--blue);">👤 Engineer<br>(Slack)</div></div>
+      <div class="trace-right">
+        <div class="trace-msg"><span class="pill pill-blue">message</span> <em>"BGP to pe2 is down, what's going on?"</em></div>
+        <div class="trace-detail">POST /slack/command → FastAPI → JWT verified, role = noc-ticket</div>
+      </div>
+    </div>
+
+    <div class="trace-row">
+      <div class="trace-left"><div class="trace-actor" style="color:var(--purple);">🧠 LLM<br>(Iteration 1)</div></div>
+      <div class="trace-right">
+        <div class="trace-msg"><span class="pill pill-purple">tool call</span> <code>junos_get_bgp_neighbor_status</code> → <code>{"device":"pe1","neighbor":"10.0.0.2"}</code></div>
+        <div class="trace-detail">LLM chose this from the tool list — it was not scripted</div>
+      </div>
+    </div>
+
+    <div class="trace-row">
+      <div class="trace-left"><div class="trace-actor" style="color:var(--yellow);">🚦 Dispatcher</div></div>
+      <div class="trace-right">
+        <div class="trace-msg"><span class="pill pill-yellow">route</span> prefix = <code>junos</code> → junos.py → PyEZ NETCONF → pe1</div>
+        <div class="trace-detail">Returns: <code>{"state":"Active","last_reset":"00:03:12","reset_reason":"Notification: hold time expired"}</code></div>
+      </div>
+    </div>
+
+    <div class="trace-row">
+      <div class="trace-left"><div class="trace-actor" style="color:var(--purple);">🧠 LLM<br>(Iteration 2)</div></div>
+      <div class="trace-right">
+        <div class="trace-msg"><span class="pill pill-purple">tool call</span> <code>run_playbook</code> → <code>{"intent":"bgp_down","device":"pe1","neighbor":"10.0.0.2"}</code></div>
+        <div class="trace-detail">LLM decides to run the full BGP diagnostic playbook for more evidence</div>
+      </div>
+    </div>
+
+    <div class="trace-row">
+      <div class="trace-left"><div class="trace-actor" style="color:var(--orange);">📋 Playbook<br>Runner</div></div>
+      <div class="trace-right">
+        <div class="trace-msg"><span class="pill pill-orange">playbook</span> bgp_down: check neighbor → check route table → check interface MTU → check syslog</div>
+        <div class="trace-detail">Each step calls <code>call_tool_unprefixed()</code> which auto-adds "junos_" prefix → real device calls<br>
+        Returns: <code>{"severity":"Critical","evidence":{"hold_time_expired":true,"mtu_mismatch":true}}</code></div>
+      </div>
+    </div>
+
+    <div class="trace-row">
+      <div class="trace-left"><div class="trace-actor" style="color:var(--purple);">🧠 LLM<br>(Final)</div></div>
+      <div class="trace-right">
+        <div class="trace-msg"><span class="pill pill-purple">answer</span> No more tool calls — writes plain text response</div>
+        <div class="trace-detail">"BGP to pe2 is <strong>Critical</strong>. Hold timer expired 3 min ago due to MTU mismatch (pe1=1500, pe2=9000). Recommend fixing MTU on ge-0/0/1."</div>
+      </div>
+    </div>
+
+    <div class="trace-row">
+      <div class="trace-left"><div class="trace-actor" style="color:var(--blue);">👤 Engineer<br>(Slack)</div></div>
+      <div class="trace-right">
+        <div class="trace-msg"><span class="pill pill-blue">response</span> Answer posted back to Slack channel</div>
+        <div class="trace-detail">FastAPI streams response → Slack API → engineer sees full diagnosis in channel</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     JIRA DUAL PATH
+══════════════════════════════════════════════ -->
+<div class="section-header">
+  <h2>Jira — two paths, one system</h2>
+  <div class="section-line"></div>
+</div>
+
+<div class="jira-section">
+  <div class="jira-path jira-path-a">
+    <h3>Path A — LLM asks Jira (48 tools via mcp-atlassian)</h3>
+    <div style="height:8px;"></div>
+    <div class="jira-step"><span class="jira-arrow">→</span><div class="jira-step-text">Engineer: <em>"Create a P2 Jira ticket for the BGP issue on pe1"</em></div></div>
+    <div class="jira-step"><span class="jira-arrow">→</span><div class="jira-step-text">LLM calls <strong>mcp-atlassian tool</strong> (e.g. <code>jira_create_issue</code>)</div></div>
+    <div class="jira-step"><span class="jira-arrow">→</span><div class="jira-step-text">Dispatcher → MCPClient → SSE → <strong>mcp-atlassian sidecar</strong> on :8104</div></div>
+    <div class="jira-step"><span class="jira-arrow">→</span><div class="jira-step-text">mcp-atlassian → Jira REST API → ticket created</div></div>
+    <div style="margin-top:10px; font-size:0.7rem; color:#9775fa;">✓ 48 tools: search, create, update, transition, sprints, comments…<br>✓ Atlassian-maintained — zero maintenance for us</div>
+  </div>
+
+  <div class="jira-path jira-path-b">
+    <h3>Path B — Slack command (4 tools via jira.py)</h3>
+    <div style="height:8px;"></div>
+    <div class="jira-step"><span class="jira-arrow">→</span><div class="jira-step-text">Engineer types <code>/noc ticket BGP down on pe1</code> in Slack</div></div>
+    <div class="jira-step"><span class="jira-arrow">→</span><div class="jira-step-text">Slack slash-command handler in FastAPI parses intent</div></div>
+    <div class="jira-step"><span class="jira-arrow">→</span><div class="jira-step-text"><strong>Calls jira.py directly</strong> — no LLM involved, no MCP overhead</div></div>
+    <div class="jira-step"><span class="jira-arrow">→</span><div class="jira-step-text">jira.py → httpx → Jira REST API → ticket created instantly</div></div>
+    <div style="margin-top:10px; font-size:0.7rem; color:#79c0ff;">✓ Instant: no LLM round-trip<br>✓ 4 tools: create · close · comment · update fields</div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════
+     BACKENDS MAP
+══════════════════════════════════════════════ -->
+<div class="section-header">
+  <h2>All backends at a glance</h2>
+  <div class="section-line"></div>
+</div>
+
+<div class="backends-section">
+  <div style="display:grid; grid-template-columns:repeat(3,1fr) repeat(2,1fr); gap:10px;">
+
+    <!-- Device adapters -->
+    <div class="box box-blue">
+      <div class="box-title">🔵 Cisco IOS XR</div>
+      <div class="box-body">
+        <span class="pill pill-blue">cisco_*</span><br>
+        Netmiko SSH<br>18 tools · SSH pool 60 s TTL<br>
+        get_bgp_summary, get_cpu_memory, get_interface_health…
+      </div>
+    </div>
+
+    <div class="box box-orange">
+      <div class="box-title">🟠 Juniper Junos</div>
+      <div class="box-body">
+        <span class="pill pill-orange">junos_*</span><br>
+        PyEZ NETCONF (structured XML)<br>19 tools · SSH pool 60 s TTL<br>
+        get_bgp_neighbor_status, get_isis_neighbors…
+      </div>
+    </div>
+
+    <div class="box" style="background:#1a0a0a; border-color:#5c1a1a;">
+      <div class="box-title" style="color:#f85149;">🔴 Nokia SR OS</div>
+      <div class="box-body">
+        <span class="pill pill-muted" style="color:#f85149; border-color:#5c1a1a;">nokia_*</span><br>
+        Netmiko SSH<br>18 tools · SSH pool 60 s TTL<br>
+        get_chassis_health, get_ospf_neighbors…
+      </div>
+    </div>
+
+    <div class="box box-purple">
+      <div class="box-title">🟣 Jira (mcp-atlassian)</div>
+      <div class="box-body">
+        <span class="pill pill-purple">jira_*</span> <span class="pill pill-purple">vendor MCP</span><br>
+        Docker sidecar · SSE :8104<br>48 tools · Atlassian-maintained<br>
+        search, create, transition, sprints…
+      </div>
+    </div>
+
+    <div class="box box-green">
+      <div class="box-title">🟢 Prometheus + Loki</div>
+      <div class="box-body">
+        <span class="pill pill-green">prometheus_*</span> <span class="pill pill-green">syslog_*</span><br>
+        Direct httpx adapters<br>5 tools each · no MCP overhead<br>
+        PromQL queries · LogQL log search
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

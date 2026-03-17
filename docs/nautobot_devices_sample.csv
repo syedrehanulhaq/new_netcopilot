@@ -1,0 +1,4 @@
+name,site,role,manufacturer,device_type,primary_ip4
+lab-junos-1,Lab,Core,Juniper,VMX,10.0.0.11/32
+lab-iosxr-1,Lab,Core,Cisco,IOSXRv,10.0.0.12/32
+lab-nokia-1,Lab,Core,Nokia,SR-OS,10.0.0.13/32
