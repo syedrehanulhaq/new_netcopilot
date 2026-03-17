@@ -10,3 +10,11 @@ __pycache__
 logs
 litellm.yaml
 Dockerfile
+data/
+.runtime/
+*.pptx
+marketing-site/
+docs/
+*.md
+.gitignore
+.github/
