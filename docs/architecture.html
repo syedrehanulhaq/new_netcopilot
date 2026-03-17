@@ -87,8 +87,8 @@
   .flow-step-body h4 { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
   .flow-step-body p { font-size: 14px; color: var(--text-dim); margin: 0 0 8px; }
 
-  /* MCP SERVER CARDS */
-  .mcp-card { border-radius: 10px; padding: 16px; border: 1px solid; }
+  /* ADAPTER CARDS */
+  .adapter-card { border-radius: 10px; padding: 16px; border: 1px solid; }
 
   /* COMPARISON TABLE */
   table { width: 100%; border-collapse: collapse; }
@@ -116,7 +116,7 @@
   <a href="#overview">Overview</a>
   <a href="#architecture">Architecture</a>
   <a href="#flow">Request Flow</a>
-  <a href="#mcp">MCP Servers</a>
+  <a href="#adapters">Tool Adapters</a>
   <a href="#playbooks">Playbooks</a>
   <a href="#comparison">Before vs After</a>
 </nav>
@@ -125,13 +125,13 @@
 
   <!-- HERO -->
   <div class="hero" id="overview">
-    <div class="version-pill">v2.0 · MCP Architecture</div>
+    <div class="version-pill">v2.0 · In-Process Adapter Architecture</div>
     <h1>NetCopilot</h1>
     <p class="subtitle">AI-powered NOC assistant for multi-vendor network operations<br>Powered by Claude / GPT-4 · Cisco · Juniper · Nokia</p>
     <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
       <span class="badge badge-blue">FastAPI</span>
-      <span class="badge badge-green">MCP Protocol</span>
-      <span class="badge badge-blue">Claude Sonnet</span>
+      <span class="badge badge-green">Direct Adapters</span>
+      <span class="badge badge-blue">Claude / GPT-4</span>
       <span class="badge badge-yellow">NETCONF / SSH</span>
       <span class="badge badge-green">Auth0</span>
       <span class="badge badge-red">Jira</span>
@@ -142,7 +142,7 @@
   <section id="architecture">
     <h2>System Architecture</h2>
     <div class="diagram">
-      <svg viewBox="0 0 1100 620" width="100%" style="display:block;">
+      <svg viewBox="0 0 1100 560" width="100%" style="display:block;">
         <defs>
           <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
             <path d="M0,0 L0,6 L8,3 z" fill="#6c8ef5" opacity="0.7"/>
@@ -153,153 +153,141 @@
           <marker id="arr-orange" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
             <path d="M0,0 L0,6 L8,3 z" fill="#f97316" opacity="0.8"/>
           </marker>
+          <marker id="arr-yellow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#fbbf24" opacity="0.8"/>
+          </marker>
         </defs>
 
         <!-- USER -->
-        <rect x="20" y="260" width="120" height="60" rx="10" fill="#1a1d27" stroke="#6c8ef5" stroke-width="1.5"/>
-        <text x="80" y="284" text-anchor="middle" fill="#6c8ef5" font-size="11" font-weight="600">👤 USER</text>
-        <text x="80" y="300" text-anchor="middle" fill="#8892b0" font-size="10">Browser / Slack</text>
-        <text x="80" y="314" text-anchor="middle" fill="#8892b0" font-size="10">Teams / API</text>
+        <rect x="20" y="230" width="120" height="60" rx="10" fill="#1a1d27" stroke="#6c8ef5" stroke-width="1.5"/>
+        <text x="80" y="254" text-anchor="middle" fill="#6c8ef5" font-size="11" font-weight="600">👤 USER</text>
+        <text x="80" y="270" text-anchor="middle" fill="#8892b0" font-size="10">Browser / Slack</text>
+        <text x="80" y="284" text-anchor="middle" fill="#8892b0" font-size="10">Teams / API</text>
 
         <!-- FASTAPI BOX -->
-        <rect x="190" y="160" width="200" height="260" rx="12" fill="#22263a" stroke="#6c8ef5" stroke-width="1.5"/>
-        <text x="290" y="185" text-anchor="middle" fill="#6c8ef5" font-size="13" font-weight="700">FastAPI App</text>
-        <text x="290" y="200" text-anchor="middle" fill="#546e7a" font-size="10">app.py · port 8001</text>
+        <rect x="185" y="120" width="200" height="310" rx="12" fill="#22263a" stroke="#6c8ef5" stroke-width="1.5"/>
+        <text x="285" y="145" text-anchor="middle" fill="#6c8ef5" font-size="13" font-weight="700">FastAPI App</text>
+        <text x="285" y="160" text-anchor="middle" fill="#546e7a" font-size="10">app.py · port 8001</text>
 
-        <rect x="205" y="210" width="170" height="32" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
-        <text x="290" y="229" text-anchor="middle" fill="#a78bfa" font-size="11">🔐 Auth0 Middleware</text>
+        <rect x="200" y="170" width="170" height="28" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
+        <text x="285" y="188" text-anchor="middle" fill="#a78bfa" font-size="11">🔐 Auth0 Middleware</text>
 
-        <rect x="205" y="250" width="170" height="32" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
-        <text x="290" y="269" text-anchor="middle" fill="#22d3ee" font-size="11">⚙️ Settings DB (SQLite)</text>
+        <rect x="200" y="206" width="170" height="28" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
+        <text x="285" y="224" text-anchor="middle" fill="#22d3ee" font-size="11">⚙️ Settings DB (SQLite)</text>
 
-        <rect x="205" y="290" width="170" height="32" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
-        <text x="290" y="309" text-anchor="middle" fill="#fbbf24" font-size="11">📋 Playbook Store</text>
+        <rect x="200" y="242" width="170" height="28" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
+        <text x="285" y="260" text-anchor="middle" fill="#fbbf24" font-size="11">📋 Playbook Store</text>
 
-        <rect x="205" y="330" width="170" height="32" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
-        <text x="290" y="349" text-anchor="middle" fill="#34d399" font-size="11">🧠 _run_chat()</text>
+        <rect x="200" y="278" width="170" height="28" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
+        <text x="285" y="296" text-anchor="middle" fill="#34d399" font-size="11">🧠 _run_chat()</text>
 
-        <rect x="205" y="370" width="170" height="32" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
-        <text x="290" y="389" text-anchor="middle" fill="#f87171" font-size="11">🚦 Rate Limiter</text>
+        <rect x="200" y="314" width="170" height="28" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
+        <text x="285" y="332" text-anchor="middle" fill="#f87171" font-size="11">🚦 Rate Limiter</text>
+
+        <rect x="200" y="350" width="170" height="28" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
+        <text x="285" y="368" text-anchor="middle" fill="#fb923c" font-size="11">🔀 ToolDispatcher</text>
+
+        <rect x="200" y="386" width="170" height="28" rx="6" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
+        <text x="285" y="404" text-anchor="middle" fill="#8892b0" font-size="11">💾 memory.db</text>
 
         <!-- LLM ADAPTER -->
-        <rect x="450" y="200" width="170" height="100" rx="12" fill="#22263a" stroke="#a78bfa" stroke-width="1.5"/>
-        <text x="535" y="224" text-anchor="middle" fill="#a78bfa" font-size="13" font-weight="700">LLM Adapter</text>
-        <text x="535" y="244" text-anchor="middle" fill="#546e7a" font-size="10">adapters/llm/</text>
-        <rect x="465" y="252" width="65" height="24" rx="5" fill="#1a1d27" stroke="#6366f1" stroke-width="1"/>
-        <text x="497" y="268" text-anchor="middle" fill="#818cf8" font-size="10">Claude</text>
-        <rect x="540" y="252" width="65" height="24" rx="5" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
-        <text x="572" y="268" text-anchor="middle" fill="#8892b0" font-size="10">OpenAI</text>
+        <rect x="445" y="160" width="170" height="100" rx="12" fill="#22263a" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="530" y="185" text-anchor="middle" fill="#a78bfa" font-size="13" font-weight="700">LLM Adapter</text>
+        <text x="530" y="202" text-anchor="middle" fill="#546e7a" font-size="10">adapters/llm/</text>
+        <rect x="460" y="212" width="65" height="24" rx="5" fill="#1a1d27" stroke="#6366f1" stroke-width="1"/>
+        <text x="492" y="228" text-anchor="middle" fill="#818cf8" font-size="10">Claude</text>
+        <rect x="535" y="212" width="65" height="24" rx="5" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
+        <text x="567" y="228" text-anchor="middle" fill="#8892b0" font-size="10">OpenAI</text>
 
-        <!-- ANTHROPIC CLOUD -->
-        <rect x="460" y="60" width="150" height="60" rx="10" fill="#1a1d27" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4,2"/>
-        <text x="535" y="83" text-anchor="middle" fill="#818cf8" font-size="11" font-weight="600">☁️ Anthropic API</text>
-        <text x="535" y="99" text-anchor="middle" fill="#546e7a" font-size="10">claude-sonnet-4-6</text>
-        <text x="535" y="113" text-anchor="middle" fill="#546e7a" font-size="10">api.anthropic.com</text>
+        <!-- LLM CLOUD -->
+        <rect x="455" y="40" width="150" height="60" rx="10" fill="#1a1d27" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4,2"/>
+        <text x="530" y="63" text-anchor="middle" fill="#818cf8" font-size="11" font-weight="600">☁️ LLM API</text>
+        <text x="530" y="79" text-anchor="middle" fill="#546e7a" font-size="10">Anthropic / OpenAI</text>
+        <text x="530" y="93" text-anchor="middle" fill="#546e7a" font-size="10">HTTPS · tokens only</text>
 
-        <!-- MCP CLIENT -->
-        <rect x="450" y="360" width="170" height="80" rx="12" fill="#22263a" stroke="#34d399" stroke-width="1.5"/>
-        <text x="535" y="387" text-anchor="middle" fill="#34d399" font-size="13" font-weight="700">MCP Client</text>
-        <text x="535" y="404" text-anchor="middle" fill="#546e7a" font-size="10">mcp_client/client.py</text>
-        <text x="535" y="420" text-anchor="middle" fill="#8892b0" font-size="10">Routes tool calls</text>
-        <text x="535" y="434" text-anchor="middle" fill="#8892b0" font-size="10">to correct server</text>
+        <!-- DEVICE ADAPTERS BOX -->
+        <rect x="445" y="310" width="200" height="160" rx="12" fill="#22263a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="545" y="333" text-anchor="middle" fill="#34d399" font-size="13" font-weight="700">Device Adapters</text>
+        <text x="545" y="349" text-anchor="middle" fill="#546e7a" font-size="10">adapters/devices/ · in-process</text>
 
-        <!-- MCP SERVERS ROW -->
-        <!-- Junos -->
-        <rect x="680" y="120" width="110" height="80" rx="10" fill="#1a1d27" stroke="#f97316" stroke-width="1.5"/>
-        <text x="735" y="145" text-anchor="middle" fill="#f97316" font-size="12" font-weight="700">Junos MCP</text>
-        <text x="735" y="163" text-anchor="middle" fill="#546e7a" font-size="10">port 8101</text>
-        <text x="735" y="179" text-anchor="middle" fill="#fbbf24" font-size="10">19 tools</text>
-        <text x="735" y="193" text-anchor="middle" fill="#546e7a" font-size="9">NETCONF/PyEZ</text>
+        <rect x="460" y="358" width="50" height="22" rx="5" fill="#1a1d27" stroke="#f97316" stroke-width="1"/>
+        <text x="485" y="373" text-anchor="middle" fill="#f97316" font-size="10">Junos</text>
 
-        <!-- Cisco -->
-        <rect x="680" y="220" width="110" height="80" rx="10" fill="#1a1d27" stroke="#06b6d4" stroke-width="1.5"/>
-        <text x="735" y="245" text-anchor="middle" fill="#06b6d4" font-size="12" font-weight="700">Cisco MCP</text>
-        <text x="735" y="263" text-anchor="middle" fill="#546e7a" font-size="10">port 8102</text>
-        <text x="735" y="279" text-anchor="middle" fill="#fbbf24" font-size="10">17 tools</text>
-        <text x="735" y="293" text-anchor="middle" fill="#546e7a" font-size="9">SSH/NETCONF</text>
+        <rect x="518" y="358" width="50" height="22" rx="5" fill="#1a1d27" stroke="#06b6d4" stroke-width="1"/>
+        <text x="543" y="373" text-anchor="middle" fill="#06b6d4" font-size="10">Cisco</text>
 
-        <!-- Nokia -->
-        <rect x="680" y="320" width="110" height="80" rx="10" fill="#1a1d27" stroke="#3b82f6" stroke-width="1.5"/>
-        <text x="735" y="345" text-anchor="middle" fill="#3b82f6" font-size="12" font-weight="700">Nokia MCP</text>
-        <text x="735" y="363" text-anchor="middle" fill="#546e7a" font-size="10">port 8103</text>
-        <text x="735" y="379" text-anchor="middle" fill="#fbbf24" font-size="10">19 tools</text>
-        <text x="735" y="393" text-anchor="middle" fill="#546e7a" font-size="9">SSH/NETCONF</text>
+        <rect x="576" y="358" width="50" height="22" rx="5" fill="#1a1d27" stroke="#3b82f6" stroke-width="1"/>
+        <text x="601" y="373" text-anchor="middle" fill="#3b82f6" font-size="10">Nokia</text>
 
-        <!-- Jira -->
-        <rect x="680" y="420" width="110" height="70" rx="10" fill="#1a1d27" stroke="#6366f1" stroke-width="1.5"/>
-        <text x="735" y="443" text-anchor="middle" fill="#6366f1" font-size="12" font-weight="700">Jira MCP</text>
-        <text x="735" y="461" text-anchor="middle" fill="#546e7a" font-size="10">port 8104</text>
-        <text x="735" y="479" text-anchor="middle" fill="#fbbf24" font-size="10">4 tools</text>
+        <text x="545" y="408" text-anchor="middle" fill="#8892b0" font-size="10">Circuit breaker · conn pool</text>
+        <text x="545" y="424" text-anchor="middle" fill="#8892b0" font-size="10">NETCONF (PyEZ/ncclient)</text>
+        <text x="545" y="440" text-anchor="middle" fill="#8892b0" font-size="10">SSH (Netmiko) · 57 tools</text>
+        <text x="545" y="456" text-anchor="middle" fill="#546e7a" font-size="9">credentials.py → Vault / env / settings.db</text>
 
-        <!-- Prometheus -->
-        <rect x="800" y="320" width="110" height="80" rx="10" fill="#1a1d27" stroke="#e11d48" stroke-width="1.5"/>
-        <text x="855" y="345" text-anchor="middle" fill="#e11d48" font-size="11" font-weight="700">Prometheus</text>
-        <text x="855" y="361" text-anchor="middle" fill="#e11d48" font-size="11" font-weight="700">MCP</text>
-        <text x="855" y="379" text-anchor="middle" fill="#546e7a" font-size="10">port 8105</text>
-        <text x="855" y="395" text-anchor="middle" fill="#fbbf24" font-size="10">5 tools</text>
-
-        <!-- Syslog -->
-        <rect x="800" y="420" width="110" height="70" rx="10" fill="#1a1d27" stroke="#10b981" stroke-width="1.5"/>
-        <text x="855" y="443" text-anchor="middle" fill="#10b981" font-size="12" font-weight="700">Syslog MCP</text>
-        <text x="855" y="461" text-anchor="middle" fill="#546e7a" font-size="10">port 8106</text>
-        <text x="855" y="479" text-anchor="middle" fill="#fbbf24" font-size="10">5 tools</text>
+        <!-- INTEGRATION ADAPTERS BOX -->
+        <rect x="445" y="480" width="200" height="60" rx="10" fill="#1a1d27" stroke="#6366f1" stroke-width="1.5"/>
+        <text x="545" y="500" text-anchor="middle" fill="#6366f1" font-size="11" font-weight="700">Integration Adapters</text>
+        <text x="545" y="516" text-anchor="middle" fill="#546e7a" font-size="10">adapters/integrations/ · in-process</text>
+        <text x="545" y="530" text-anchor="middle" fill="#8892b0" font-size="10">Jira · Prometheus · Syslog</text>
 
         <!-- DEVICES ROW -->
-        <rect x="960" y="120" width="110" height="50" rx="8" fill="#1a1d27" stroke="#f97316" stroke-width="1" stroke-dasharray="3,2"/>
-        <text x="1015" y="141" text-anchor="middle" fill="#f97316" font-size="11">🌐 Juniper</text>
-        <text x="1015" y="157" text-anchor="middle" fill="#546e7a" font-size="10">srx, pe1, pe2...</text>
+        <rect x="720" y="310" width="120" height="45" rx="8" fill="#1a1d27" stroke="#f97316" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="780" y="330" text-anchor="middle" fill="#f97316" font-size="11">🌐 Juniper</text>
+        <text x="780" y="346" text-anchor="middle" fill="#546e7a" font-size="10">NETCONF :830</text>
 
-        <rect x="960" y="190" width="110" height="50" rx="8" fill="#1a1d27" stroke="#06b6d4" stroke-width="1" stroke-dasharray="3,2"/>
-        <text x="1015" y="211" text-anchor="middle" fill="#06b6d4" font-size="11">🌐 Cisco</text>
-        <text x="1015" y="227" text-anchor="middle" fill="#546e7a" font-size="10">sandbox-iosxr-1</text>
+        <rect x="720" y="368" width="120" height="45" rx="8" fill="#1a1d27" stroke="#06b6d4" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="780" y="388" text-anchor="middle" fill="#06b6d4" font-size="11">🌐 Cisco IOS XR</text>
+        <text x="780" y="404" text-anchor="middle" fill="#546e7a" font-size="10">SSH / NETCONF</text>
 
-        <rect x="960" y="260" width="110" height="50" rx="8" fill="#1a1d27" stroke="#3b82f6" stroke-width="1" stroke-dasharray="3,2"/>
-        <text x="1015" y="281" text-anchor="middle" fill="#3b82f6" font-size="11">🌐 Nokia</text>
-        <text x="1015" y="297" text-anchor="middle" fill="#546e7a" font-size="10">SR OS devices</text>
+        <rect x="720" y="426" width="120" height="45" rx="8" fill="#1a1d27" stroke="#3b82f6" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="780" y="446" text-anchor="middle" fill="#3b82f6" font-size="11">🌐 Nokia SR OS</text>
+        <text x="780" y="462" text-anchor="middle" fill="#546e7a" font-size="10">SSH / NETCONF</text>
+
+        <!-- EXTERNAL SERVICES -->
+        <rect x="720" y="480" width="120" height="60" rx="8" fill="#1a1d27" stroke="#6366f1" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="780" y="500" text-anchor="middle" fill="#6366f1" font-size="10">Jira REST API</text>
+        <text x="780" y="516" text-anchor="middle" fill="#e11d48" font-size="10">Prometheus</text>
+        <text x="780" y="532" text-anchor="middle" fill="#10b981" font-size="10">Syslog / Loki</text>
 
         <!-- ARROWS -->
         <!-- User to FastAPI -->
-        <line x1="140" y1="290" x2="188" y2="290" stroke="#6c8ef5" stroke-width="1.5" marker-end="url(#arr)"/>
-        <text x="162" y="282" text-anchor="middle" fill="#546e7a" font-size="9">HTTP</text>
+        <line x1="140" y1="260" x2="183" y2="260" stroke="#6c8ef5" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="162" y="252" text-anchor="middle" fill="#546e7a" font-size="9">HTTP</text>
 
         <!-- FastAPI _run_chat to LLM -->
-        <line x1="390" y1="340" x2="448" y2="280" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr)"/>
-        <text x="435" y="320" text-anchor="middle" fill="#a78bfa" font-size="9">chat()</text>
+        <line x1="385" y1="292" x2="443" y2="230" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="430" y="270" text-anchor="middle" fill="#a78bfa" font-size="9">chat()</text>
 
-        <!-- LLM to Anthropic API -->
-        <line x1="535" y1="200" x2="535" y2="122" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4,2" marker-end="url(#arr)"/>
-        <text x="555" y="165" fill="#546e7a" font-size="9">API call</text>
+        <!-- LLM to Cloud -->
+        <line x1="530" y1="160" x2="530" y2="102" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4,2" marker-end="url(#arr)"/>
+        <text x="550" y="135" fill="#546e7a" font-size="9">API call</text>
 
-        <!-- FastAPI to MCP Client -->
-        <line x1="390" y1="360" x2="448" y2="395" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr-green)"/>
-        <text x="430" y="390" text-anchor="middle" fill="#34d399" font-size="9">call_tool()</text>
+        <!-- ToolDispatcher to Device Adapters -->
+        <line x1="385" y1="364" x2="443" y2="390" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr-green)"/>
+        <text x="430" y="360" text-anchor="middle" fill="#34d399" font-size="9">call_tool()</text>
 
-        <!-- MCP Client to Servers -->
-        <line x1="620" y1="390" x2="678" y2="360" stroke="#34d399" stroke-width="1.2" marker-end="url(#arr-green)"/>
-        <line x1="620" y1="400" x2="678" y2="420" stroke="#6366f1" stroke-width="1.2" marker-end="url(#arr)"/>
-        <line x1="620" y1="390" x2="798" y2="355" stroke="#e11d48" stroke-width="1.2" marker-end="url(#arr)"/>
-        <line x1="620" y1="400" x2="798" y2="450" stroke="#10b981" stroke-width="1.2" marker-end="url(#arr-green)"/>
+        <!-- ToolDispatcher to Integration Adapters -->
+        <path d="M385,370 C410,370 420,510 443,510" stroke="#6366f1" stroke-width="1.2" fill="none" marker-end="url(#arr)"/>
 
-        <!-- MCP Client to Junos/Cisco/Nokia -->
-        <path d="M620,380 C650,380 660,260 678,260" stroke="#06b6d4" stroke-width="1.2" fill="none" marker-end="url(#arr)"/>
-        <path d="M620,380 C650,380 660,160 678,160" stroke="#f97316" stroke-width="1.2" fill="none" marker-end="url(#arr-orange)"/>
+        <!-- Device Adapters to Devices -->
+        <line x1="645" y1="357" x2="718" y2="335" stroke="#f97316" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr-orange)"/>
+        <line x1="645" y1="380" x2="718" y2="392" stroke="#06b6d4" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr)"/>
+        <line x1="645" y1="405" x2="718" y2="450" stroke="#3b82f6" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr)"/>
 
-        <!-- Servers to Devices -->
-        <line x1="790" y1="157" x2="958" y2="148" stroke="#f97316" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr-orange)"/>
-        <line x1="790" y1="257" x2="958" y2="215" stroke="#06b6d4" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr)"/>
-        <line x1="790" y1="357" x2="958" y2="287" stroke="#3b82f6" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr)"/>
+        <!-- Integration Adapters to External -->
+        <line x1="645" y1="510" x2="718" y2="510" stroke="#6366f1" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr)"/>
 
         <!-- LEGEND -->
-        <rect x="20" y="460" width="380" height="110" rx="8" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
-        <text x="36" y="480" fill="#8892b0" font-size="11" font-weight="600">LEGEND</text>
-        <line x1="36" y1="495" x2="70" y2="495" stroke="#6c8ef5" stroke-width="1.5"/>
-        <text x="76" y="499" fill="#8892b0" font-size="10">HTTP request/response</text>
-        <line x1="36" y1="513" x2="70" y2="513" stroke="#a78bfa" stroke-width="1.5"/>
-        <text x="76" y="517" fill="#8892b0" font-size="10">LLM API call</text>
-        <line x1="36" y1="531" x2="70" y2="531" stroke="#34d399" stroke-width="1.5"/>
-        <text x="76" y="535" fill="#8892b0" font-size="10">MCP tool call (SSE)</text>
-        <line x1="36" y1="549" x2="70" y2="549" stroke="#f97316" stroke-width="1" stroke-dasharray="3,2"/>
-        <text x="76" y="553" fill="#8892b0" font-size="10">Device connection (NETCONF/SSH)</text>
+        <rect x="20" y="420" width="340" height="110" rx="8" fill="#1a1d27" stroke="#2e3352" stroke-width="1"/>
+        <text x="36" y="440" fill="#8892b0" font-size="11" font-weight="600">LEGEND</text>
+        <line x1="36" y1="455" x2="70" y2="455" stroke="#6c8ef5" stroke-width="1.5"/>
+        <text x="76" y="459" fill="#8892b0" font-size="10">HTTP request/response</text>
+        <line x1="36" y1="473" x2="70" y2="473" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="76" y="477" fill="#8892b0" font-size="10">LLM API call (cloud)</text>
+        <line x1="36" y1="491" x2="70" y2="491" stroke="#34d399" stroke-width="1.5"/>
+        <text x="76" y="495" fill="#8892b0" font-size="10">In-process function call</text>
+        <line x1="36" y1="509" x2="70" y2="509" stroke="#f97316" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="76" y="513" fill="#8892b0" font-size="10">Device connection (NETCONF/SSH)</text>
       </svg>
     </div>
   </section>
@@ -309,7 +297,7 @@
     <h2>Request Flow — "show ge-0/0/0 status on srx"</h2>
 
     <div class="diagram" style="overflow-x:auto; padding:0;">
-      <svg viewBox="0 0 1240 700" width="100%" style="display:block;min-width:860px;">
+      <svg viewBox="0 0 1100 700" width="100%" style="display:block;min-width:860px;">
         <defs>
           <marker id="fa"  markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#6c8ef5"/></marker>
           <marker id="fa-p" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#a78bfa"/></marker>
@@ -319,155 +307,122 @@
         </defs>
 
         <!-- ═══════════ HEADER BAR ═══════════ -->
-        <rect x="0" y="0" width="1240" height="42" fill="#22263a"/>
-        <!-- col boundaries: 0|145|395|625|795|1240 -->
+        <rect x="0" y="0" width="1100" height="42" fill="#22263a"/>
         <text x="72"   y="26" text-anchor="middle" fill="#6c8ef5" font-size="12" font-weight="700">User</text>
-        <text x="270"  y="26" text-anchor="middle" fill="#a78bfa" font-size="12" font-weight="700">FastAPI  app.py</text>
-        <text x="510"  y="26" text-anchor="middle" fill="#818cf8" font-size="12" font-weight="700">LLM  (Claude)</text>
-        <text x="710"  y="26" text-anchor="middle" fill="#34d399" font-size="12" font-weight="700">MCP Client</text>
-        <text x="1017" y="26" text-anchor="middle" fill="#f97316" font-size="12" font-weight="700">Junos MCP Server</text>
+        <text x="260"  y="26" text-anchor="middle" fill="#a78bfa" font-size="12" font-weight="700">FastAPI  app.py</text>
+        <text x="490"  y="26" text-anchor="middle" fill="#818cf8" font-size="12" font-weight="700">LLM  (Claude / GPT-4)</text>
+        <text x="710"  y="26" text-anchor="middle" fill="#34d399" font-size="12" font-weight="700">ToolDispatcher</text>
+        <text x="960"  y="26" text-anchor="middle" fill="#f97316" font-size="12" font-weight="700">Junos Adapter (in-process)</text>
 
         <!-- swimlane dividers -->
         <line x1="145" y1="42" x2="145" y2="700" stroke="#2e3352" stroke-width="1" stroke-dasharray="5,4"/>
-        <line x1="395" y1="42" x2="395" y2="700" stroke="#2e3352" stroke-width="1" stroke-dasharray="5,4"/>
-        <line x1="625" y1="42" x2="625" y2="700" stroke="#2e3352" stroke-width="1" stroke-dasharray="5,4"/>
-        <line x1="795" y1="42" x2="795" y2="700" stroke="#2e3352" stroke-width="1" stroke-dasharray="5,4"/>
+        <line x1="375" y1="42" x2="375" y2="700" stroke="#2e3352" stroke-width="1" stroke-dasharray="5,4"/>
+        <line x1="605" y1="42" x2="605" y2="700" stroke="#2e3352" stroke-width="1" stroke-dasharray="5,4"/>
+        <line x1="815" y1="42" x2="815" y2="700" stroke="#2e3352" stroke-width="1" stroke-dasharray="5,4"/>
 
         <!-- ═══════════ ROW 1  y=90 ═══════════ -->
-        <!-- [User] POST /chat -->
         <rect x="9" y="64" width="127" height="52" rx="8" fill="#1a1d27" stroke="#6c8ef5" stroke-width="1.5"/>
         <text x="72" y="85"  text-anchor="middle" fill="#6c8ef5"  font-size="11" font-weight="700">POST /chat</text>
         <text x="72" y="101" text-anchor="middle" fill="#8892b0" font-size="10">"show ge-0/0/0..."</text>
-        <!-- arrow → FastAPI -->
         <line x1="136" y1="90" x2="151" y2="90" stroke="#6c8ef5" stroke-width="1.5" marker-end="url(#fa)"/>
 
-        <!-- [FastAPI] Build context -->
-        <rect x="153" y="64" width="234" height="52" rx="8" fill="#1a1d27" stroke="#a78bfa" stroke-width="1.5"/>
-        <text x="270" y="85"  text-anchor="middle" fill="#a78bfa" font-size="11" font-weight="700">Build context</text>
-        <text x="270" y="101" text-anchor="middle" fill="#8892b0" font-size="10">system prompt + 33 tools + history</text>
-        <!-- arrow → LLM -->
-        <line x1="387" y1="90" x2="401" y2="90" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#fa-p)"/>
+        <rect x="153" y="64" width="214" height="52" rx="8" fill="#1a1d27" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="260" y="85"  text-anchor="middle" fill="#a78bfa" font-size="11" font-weight="700">Build context</text>
+        <text x="260" y="101" text-anchor="middle" fill="#8892b0" font-size="10">system prompt + 57 tools + history</text>
+        <line x1="367" y1="90" x2="381" y2="90" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#fa-p)"/>
 
-        <!-- [LLM] CALL #1 -->
-        <rect x="403" y="64" width="214" height="52" rx="8" fill="#1a1d27" stroke="#818cf8" stroke-width="1.5"/>
-        <text x="510" y="83"  text-anchor="middle" fill="#818cf8" font-size="11" font-weight="700">CALL #1 — Tool selection</text>
-        <text x="510" y="99"  text-anchor="middle" fill="#8892b0" font-size="10">"srx = Juniper →</text>
-        <text x="510" y="111" text-anchor="middle" fill="#8892b0" font-size="10">call get_interface_health"</text>
+        <rect x="383" y="64" width="214" height="52" rx="8" fill="#1a1d27" stroke="#818cf8" stroke-width="1.5"/>
+        <text x="490" y="83"  text-anchor="middle" fill="#818cf8" font-size="11" font-weight="700">CALL #1 — Tool selection</text>
+        <text x="490" y="99"  text-anchor="middle" fill="#8892b0" font-size="10">"srx = Juniper →</text>
+        <text x="490" y="111" text-anchor="middle" fill="#8892b0" font-size="10">call junos_get_interface_health"</text>
 
-        <!-- vertical thread: FastAPI col -->
-        <line x1="270" y1="116" x2="270" y2="162" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
-        <!-- vertical thread: LLM col -->
-        <line x1="510" y1="116" x2="510" y2="162" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <line x1="260" y1="116" x2="260" y2="162" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <line x1="490" y1="116" x2="490" y2="162" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
 
-        <!-- ═══════════ ROW 2  y=190 — TOOL_CALL returns left ═══════════ -->
-        <!-- [LLM] Returns TOOL_CALL -->
-        <rect x="403" y="162" width="214" height="52" rx="8" fill="#22263a" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="510" y="183" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="700">↩ Returns TOOL_CALL</text>
-        <text x="510" y="199" text-anchor="middle" fill="#8892b0" font-size="10">get_interface_health(srx, ge-0/0/0)</text>
-        <!-- arrow ← FastAPI -->
-        <line x1="403" y1="188" x2="389" y2="188" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#fa-y)"/>
+        <!-- ═══════════ ROW 2  y=190 ═══════════ -->
+        <rect x="383" y="162" width="214" height="52" rx="8" fill="#22263a" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="490" y="183" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="700">↩ Returns TOOL_CALL</text>
+        <text x="490" y="199" text-anchor="middle" fill="#8892b0" font-size="10">junos_get_interface_health(srx, ge-0/0/0)</text>
+        <line x1="383" y1="188" x2="369" y2="188" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#fa-y)"/>
 
-        <!-- [FastAPI] Receives tool call -->
-        <rect x="153" y="162" width="234" height="52" rx="8" fill="#1a1d27" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="270" y="183" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="700">Receives TOOL_CALL</text>
-        <text x="270" y="194" text-anchor="middle" fill="#8892b0" font-size="10">name="get_interface_health"</text>
-        <text x="270" y="207" text-anchor="middle" fill="#8892b0" font-size="10">args={device:"srx", interface:"ge-0/0/0"}</text>
+        <rect x="153" y="162" width="214" height="52" rx="8" fill="#1a1d27" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="260" y="183" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="700">Receives TOOL_CALL</text>
+        <text x="260" y="194" text-anchor="middle" fill="#8892b0" font-size="10">name="junos_get_interface_health"</text>
+        <text x="260" y="207" text-anchor="middle" fill="#8892b0" font-size="10">args={device:"srx", interface:"ge-0/0/0"}</text>
 
-        <!-- vertical thread FastAPI -->
-        <line x1="270" y1="214" x2="270" y2="272" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <line x1="260" y1="214" x2="260" y2="272" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
 
-        <!-- ═══════════ ROW 3  y=308 — Route → MCP → Junos ═══════════ -->
-        <!-- [FastAPI] Route -->
-        <rect x="153" y="272" width="234" height="52" rx="8" fill="#1a1d27" stroke="#34d399" stroke-width="1.5"/>
-        <text x="270" y="290" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">Route tool call</text>
-        <text x="270" y="305" text-anchor="middle" fill="#8892b0" font-size="10">tool_to_server["get_interface_health"]</text>
-        <text x="270" y="318" text-anchor="middle" fill="#fbbf24" font-size="10">→ server = "junos"</text>
-        <!-- arrow → MCP -->
-        <line x1="387" y1="298" x2="631" y2="298" stroke="#34d399" stroke-width="1.5" marker-end="url(#fa-g)"/>
+        <!-- ═══════════ ROW 3  y=298 ═══════════ -->
+        <rect x="153" y="272" width="214" height="52" rx="8" fill="#1a1d27" stroke="#34d399" stroke-width="1.5"/>
+        <text x="260" y="290" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">dispatcher.call_tool()</text>
+        <text x="260" y="305" text-anchor="middle" fill="#8892b0" font-size="10">vendor="junos" → load adapters.devices.junos</text>
+        <text x="260" y="318" text-anchor="middle" fill="#fbbf24" font-size="10">correct_tool_vendor() validates prefix</text>
+        <line x1="367" y1="298" x2="611" y2="298" stroke="#34d399" stroke-width="1.5" marker-end="url(#fa-g)"/>
 
-        <!-- [MCP Client] SSE call -->
-        <rect x="633" y="272" width="154" height="52" rx="8" fill="#1a1d27" stroke="#34d399" stroke-width="1.5"/>
-        <text x="710" y="292" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">MCP SSE call</text>
-        <text x="710" y="308" text-anchor="middle" fill="#8892b0" font-size="10">localhost:8101/sse</text>
-        <!-- arrow → Junos -->
-        <line x1="787" y1="298" x2="801" y2="298" stroke="#34d399" stroke-width="1.5" marker-end="url(#fa-g)"/>
+        <rect x="613" y="272" width="194" height="52" rx="8" fill="#1a1d27" stroke="#34d399" stroke-width="1.5"/>
+        <text x="710" y="292" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">Route to Junos adapter</text>
+        <text x="710" y="308" text-anchor="middle" fill="#8892b0" font-size="10">adapters/devices/junos.py</text>
+        <text x="710" y="320" text-anchor="middle" fill="#8892b0" font-size="10">in-process function call</text>
+        <line x1="807" y1="298" x2="821" y2="298" stroke="#34d399" stroke-width="1.5" marker-end="url(#fa-g)"/>
 
-        <!-- [Junos MCP] execute -->
-        <rect x="803" y="260" width="428" height="80" rx="8" fill="#1a1d27" stroke="#f97316" stroke-width="1.5"/>
-        <text x="1017" y="282" text-anchor="middle" fill="#f97316" font-size="11" font-weight="700">get_interface_health(device="srx", interface="ge-0/0/0")</text>
-        <text x="1017" y="299" text-anchor="middle" fill="#8892b0" font-size="10">① get_setting("JUNIPER_USER") from settings.db</text>
-        <text x="1017" y="315" text-anchor="middle" fill="#8892b0" font-size="10">② NETCONF session → srx  66.129.234.202:41018</text>
-        <text x="1017" y="331" text-anchor="middle" fill="#8892b0" font-size="10">③ dev.rpc.get_interface_information(extensive=True)</text>
+        <rect x="823" y="255" width="260" height="95" rx="8" fill="#1a1d27" stroke="#f97316" stroke-width="1.5"/>
+        <text x="953" y="277" text-anchor="middle" fill="#f97316" font-size="11" font-weight="700">get_interface_health("srx", "ge-0/0/0")</text>
+        <text x="953" y="294" text-anchor="middle" fill="#8892b0" font-size="10">① credentials.py → JUNIPER_USER / JUNIPER_PASS</text>
+        <text x="953" y="310" text-anchor="middle" fill="#8892b0" font-size="10">② NETCONF session → srx  66.129.234.202:41018</text>
+        <text x="953" y="326" text-anchor="middle" fill="#8892b0" font-size="10">③ dev.rpc.get_interface_information(extensive=True)</text>
+        <text x="953" y="342" text-anchor="middle" fill="#546e7a" font-size="9">circuit breaker: record_success() / record_failure()</text>
 
-        <!-- vertical thread FastAPI -->
-        <line x1="270" y1="324" x2="270" y2="368" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <line x1="260" y1="324" x2="260" y2="368" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
 
-        <!-- ═══════════ ROW 4  y=395 — Raw data flows back ═══════════ -->
-        <!-- [Junos MCP] raw result -->
-        <rect x="803" y="368" width="428" height="52" rx="8" fill="#22263a" stroke="#f97316" stroke-width="1" stroke-dasharray="4,2"/>
-        <text x="1017" y="389" text-anchor="middle" fill="#f97316" font-size="11" font-weight="700">Returns raw data</text>
-        <text x="1017" y="405" text-anchor="middle" fill="#8892b0" font-size="10">{admin_status:up, oper_status:up, crc_errors:0, last_flapped:"2d"}</text>
+        <!-- ═══════════ ROW 4  y=395 ═══════════ -->
+        <rect x="823" y="368" width="260" height="52" rx="8" fill="#22263a" stroke="#f97316" stroke-width="1" stroke-dasharray="4,2"/>
+        <text x="953" y="389" text-anchor="middle" fill="#f97316" font-size="11" font-weight="700">Returns structured dict</text>
+        <text x="953" y="405" text-anchor="middle" fill="#8892b0" font-size="10">{admin_status:up, oper_status:up, crc_errors:0, last_flapped:"2d"}</text>
 
-        <!-- single continuous arrow: Junos → FastAPI (passes through MCP column) -->
-        <line x1="803" y1="394" x2="389" y2="394" stroke="#f97316" stroke-width="1.5" marker-end="url(#fa-o)"/>
-        <!-- MCP column waypoint dot -->
+        <line x1="823" y1="394" x2="369" y2="394" stroke="#f97316" stroke-width="1.5" marker-end="url(#fa-o)"/>
         <circle cx="710" cy="394" r="4" fill="#f97316" opacity="0.7"/>
-        <text x="710" y="386" text-anchor="middle" fill="#546e7a" font-size="9">via MCP client</text>
+        <text x="710" y="385" text-anchor="middle" fill="#546e7a" font-size="9">passes through dispatcher</text>
 
-        <!-- [FastAPI] receives raw data -->
-        <rect x="153" y="368" width="234" height="52" rx="8" fill="#1a1d27" stroke="#f97316" stroke-width="1.5"/>
-        <text x="270" y="387" text-anchor="middle" fill="#f97316" font-size="11" font-weight="700">Receives raw data</text>
-        <text x="270" y="402" text-anchor="middle" fill="#8892b0" font-size="10">messages.append({</text>
-        <text x="270" y="415" text-anchor="middle" fill="#8892b0" font-size="10">role:"tool", content: result})</text>
+        <rect x="153" y="368" width="214" height="52" rx="8" fill="#1a1d27" stroke="#f97316" stroke-width="1.5"/>
+        <text x="260" y="387" text-anchor="middle" fill="#f97316" font-size="11" font-weight="700">Receives tool result</text>
+        <text x="260" y="402" text-anchor="middle" fill="#8892b0" font-size="10">messages.append({role:"tool",</text>
+        <text x="260" y="415" text-anchor="middle" fill="#8892b0" font-size="10">content: json.dumps(result)})</text>
 
-        <!-- vertical thread FastAPI -->
-        <line x1="270" y1="420" x2="270" y2="452" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <line x1="260" y1="420" x2="260" y2="452" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
 
-        <!-- ═══════════ ROW 5  y=478 — Send to LLM again ═══════════ -->
-        <!-- [FastAPI] send full conversation -->
-        <rect x="153" y="452" width="234" height="52" rx="8" fill="#1a1d27" stroke="#a78bfa" stroke-width="1.5"/>
-        <text x="270" y="473" text-anchor="middle" fill="#a78bfa" font-size="11" font-weight="700">Send full conversation</text>
-        <text x="270" y="489" text-anchor="middle" fill="#8892b0" font-size="10">[system + user + tool_call + tool_result]</text>
-        <!-- arrow → LLM -->
-        <line x1="387" y1="478" x2="401" y2="478" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#fa-p)"/>
+        <!-- ═══════════ ROW 5  y=478 ═══════════ -->
+        <rect x="153" y="452" width="214" height="52" rx="8" fill="#1a1d27" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="260" y="473" text-anchor="middle" fill="#a78bfa" font-size="11" font-weight="700">Send full conversation</text>
+        <text x="260" y="489" text-anchor="middle" fill="#8892b0" font-size="10">[system + user + tool_call + tool_result]</text>
+        <line x1="367" y1="478" x2="381" y2="478" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#fa-p)"/>
 
-        <!-- [LLM] CALL #2 -->
-        <rect x="403" y="452" width="214" height="52" rx="8" fill="#1a1d27" stroke="#818cf8" stroke-width="1.5"/>
-        <text x="510" y="471" text-anchor="middle" fill="#818cf8" font-size="11" font-weight="700">CALL #2 — Write answer</text>
-        <text x="510" y="487" text-anchor="middle" fill="#8892b0" font-size="10">Reads raw data, writes human</text>
-        <text x="510" y="499" text-anchor="middle" fill="#8892b0" font-size="10">friendly diagnosis + evidence</text>
+        <rect x="383" y="452" width="214" height="52" rx="8" fill="#1a1d27" stroke="#818cf8" stroke-width="1.5"/>
+        <text x="490" y="471" text-anchor="middle" fill="#818cf8" font-size="11" font-weight="700">CALL #2 — Write answer</text>
+        <text x="490" y="487" text-anchor="middle" fill="#8892b0" font-size="10">Reads raw data, writes human-</text>
+        <text x="490" y="499" text-anchor="middle" fill="#8892b0" font-size="10">friendly diagnosis + evidence</text>
 
-        <!-- vertical thread FastAPI -->
-        <line x1="270" y1="504" x2="270" y2="548" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
-        <!-- vertical thread LLM -->
-        <line x1="510" y1="504" x2="510" y2="548" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <line x1="260" y1="504" x2="260" y2="548" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <line x1="490" y1="504" x2="490" y2="548" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
 
-        <!-- ═══════════ ROW 6  y=574 — LLM returns text ═══════════ -->
-        <!-- [LLM] reply -->
-        <rect x="403" y="548" width="214" height="52" rx="8" fill="#22263a" stroke="#34d399" stroke-width="1.5"/>
-        <text x="510" y="569" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">↩ Returns text reply</text>
-        <text x="510" y="585" text-anchor="middle" fill="#8892b0" font-size="10">"ge-0/0/0 is UP, no errors..."</text>
-        <!-- arrow ← FastAPI -->
-        <line x1="403" y1="574" x2="389" y2="574" stroke="#34d399" stroke-width="1.5" marker-end="url(#fa-g)"/>
+        <!-- ═══════════ ROW 6  y=574 ═══════════ -->
+        <rect x="383" y="548" width="214" height="52" rx="8" fill="#22263a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="490" y="569" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">↩ Returns text reply</text>
+        <text x="490" y="585" text-anchor="middle" fill="#8892b0" font-size="10">"ge-0/0/0 is UP, no errors..."</text>
+        <line x1="383" y1="574" x2="369" y2="574" stroke="#34d399" stroke-width="1.5" marker-end="url(#fa-g)"/>
 
-        <!-- [FastAPI] receives reply -->
-        <rect x="153" y="548" width="234" height="52" rx="8" fill="#1a1d27" stroke="#34d399" stroke-width="1.5"/>
-        <text x="270" y="569" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">Receives final reply</text>
-        <text x="270" y="581" text-anchor="middle" fill="#8892b0" font-size="10">_save_memory(user,</text>
-        <text x="270" y="594" text-anchor="middle" fill="#8892b0" font-size="10">[user_msg, assistant_msg])</text>
+        <rect x="153" y="548" width="214" height="52" rx="8" fill="#1a1d27" stroke="#34d399" stroke-width="1.5"/>
+        <text x="260" y="569" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">Receives final reply</text>
+        <text x="260" y="581" text-anchor="middle" fill="#8892b0" font-size="10">_save_memory(user, [user_msg +</text>
+        <text x="260" y="594" text-anchor="middle" fill="#8892b0" font-size="10">tool_results + assistant_reply])</text>
 
-        <!-- vertical thread FastAPI -->
-        <line x1="270" y1="600" x2="270" y2="638" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <line x1="260" y1="600" x2="260" y2="638" stroke="#2e3352" stroke-width="1.5" stroke-dasharray="3,3"/>
 
-        <!-- ═══════════ ROW 7  y=660 — Return to user ═══════════ -->
-        <!-- [FastAPI] return JSON -->
-        <rect x="153" y="638" width="234" height="52" rx="8" fill="#1a1d27" stroke="#22d3ee" stroke-width="1.5"/>
-        <text x="270" y="659" text-anchor="middle" fill="#22d3ee" font-size="11" font-weight="700">Return response</text>
-        <text x="270" y="675" text-anchor="middle" fill="#8892b0" font-size="10">{"reply": "ge-0/0/0 is UP..."}</text>
-        <!-- arrow ← User -->
+        <!-- ═══════════ ROW 7  y=660 ═══════════ -->
+        <rect x="153" y="638" width="214" height="52" rx="8" fill="#1a1d27" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="260" y="659" text-anchor="middle" fill="#22d3ee" font-size="11" font-weight="700">Return response</text>
+        <text x="260" y="675" text-anchor="middle" fill="#8892b0" font-size="10">{"reply": "ge-0/0/0 is UP..."}</text>
         <line x1="153" y1="664" x2="138" y2="664" stroke="#34d399" stroke-width="1.5" marker-end="url(#fa-g)"/>
 
-        <!-- [User] reply shown -->
         <rect x="9" y="638" width="127" height="52" rx="8" fill="#1a1d27" stroke="#34d399" stroke-width="1.5"/>
         <text x="72" y="659" text-anchor="middle" fill="#34d399" font-size="12" font-weight="700">✅ Reply shown</text>
         <text x="72" y="675" text-anchor="middle" fill="#8892b0" font-size="10">to user</text>
@@ -476,14 +431,16 @@
     </div>
   </section>
 
-  <!-- MCP SERVERS -->
-  <section id="mcp">
-    <h2>MCP Servers — 69 Tools Total</h2>
+  <!-- TOOL ADAPTERS -->
+  <section id="adapters">
+    <h2>Tool Adapters — 57 Tools, All In-Process</h2>
+    <p>All tool execution happens inside the NetCopilot process. There are no sidecar processes or network hops for device calls. Each adapter is a Python module loaded on demand and protected by a per-device circuit breaker.</p>
     <div class="grid grid-3" style="gap:16px;">
 
-      <div class="mcp-card" style="border-color:#f97316;background:#1a1d27;">
-        <h3 style="color:#f97316;">🟠 Junos MCP — port 8101</h3>
-        <p style="font-size:13px;color:#8892b0;margin-bottom:12px;">Juniper Junos via PyEZ + NETCONF</p>
+      <div class="adapter-card" style="border-color:#f97316;background:#1a1d27;">
+        <h3 style="color:#f97316;">🟠 Junos Adapter</h3>
+        <p style="font-size:13px;color:#8892b0;margin-bottom:4px;">adapters/devices/junos.py</p>
+        <p style="font-size:12px;color:#546e7a;margin-bottom:12px;">Juniper Junos via PyEZ + NETCONF</p>
         <div class="tags">
           <span class="tag" style="background:rgba(249,115,22,.1);color:#f97316;">get_interface_health</span>
           <span class="tag" style="background:rgba(249,115,22,.1);color:#f97316;">get_interface_status</span>
@@ -497,9 +454,10 @@
         </div>
       </div>
 
-      <div class="mcp-card" style="border-color:#06b6d4;background:#1a1d27;">
-        <h3 style="color:#06b6d4;">🔵 Cisco MCP — port 8102</h3>
-        <p style="font-size:13px;color:#8892b0;margin-bottom:12px;">Cisco IOS XR via SSH / NETCONF</p>
+      <div class="adapter-card" style="border-color:#06b6d4;background:#1a1d27;">
+        <h3 style="color:#06b6d4;">🔵 Cisco Adapter</h3>
+        <p style="font-size:13px;color:#8892b0;margin-bottom:4px;">adapters/devices/cisco.py</p>
+        <p style="font-size:12px;color:#546e7a;margin-bottom:12px;">Cisco IOS XR via Netmiko SSH + ncclient NETCONF</p>
         <div class="tags">
           <span class="tag" style="background:rgba(6,182,212,.1);color:#06b6d4;">get_interface_health</span>
           <span class="tag" style="background:rgba(6,182,212,.1);color:#06b6d4;">get_bgp_neighbor_status</span>
@@ -508,27 +466,29 @@
           <span class="tag" style="background:rgba(6,182,212,.1);color:#06b6d4;">get_acl_hits</span>
           <span class="tag" style="background:rgba(6,182,212,.1);color:#06b6d4;">get_ping</span>
           <span class="tag" style="background:rgba(6,182,212,.1);color:#06b6d4;">run_command</span>
-          <span class="tag" style="background:rgba(6,182,212,.1);color:#546e7a;">+ 10 more</span>
+          <span class="tag" style="background:rgba(6,182,212,.1);color:#546e7a;">+ 11 more</span>
         </div>
       </div>
 
-      <div class="mcp-card" style="border-color:#3b82f6;background:#1a1d27;">
-        <h3 style="color:#3b82f6;">🔵 Nokia MCP — port 8103</h3>
-        <p style="font-size:13px;color:#8892b0;margin-bottom:12px;">Nokia SR OS via SSH / NETCONF</p>
+      <div class="adapter-card" style="border-color:#3b82f6;background:#1a1d27;">
+        <h3 style="color:#3b82f6;">🔵 Nokia Adapter</h3>
+        <p style="font-size:13px;color:#8892b0;margin-bottom:4px;">adapters/devices/nokia.py</p>
+        <p style="font-size:12px;color:#546e7a;margin-bottom:12px;">Nokia SR OS via Netmiko SSH</p>
         <div class="tags">
           <span class="tag" style="background:rgba(59,130,246,.1);color:#3b82f6;">get_interface_health</span>
           <span class="tag" style="background:rgba(59,130,246,.1);color:#3b82f6;">get_bgp_summary</span>
           <span class="tag" style="background:rgba(59,130,246,.1);color:#3b82f6;">get_isis_interface</span>
           <span class="tag" style="background:rgba(59,130,246,.1);color:#3b82f6;">get_chassis_health</span>
-          <span class="tag" style="background:rgba(59,130,246,.1);color:#3b82f6;">list_devices</span>
+          <span class="tag" style="background:rgba(59,130,246,.1);color:#3b82f6;">get_cpu_memory</span>
           <span class="tag" style="background:rgba(59,130,246,.1);color:#3b82f6;">run_command</span>
-          <span class="tag" style="background:rgba(59,130,246,.1);color:#546e7a;">+ 13 more</span>
+          <span class="tag" style="background:rgba(59,130,246,.1);color:#546e7a;">+ 12 more</span>
         </div>
       </div>
 
-      <div class="mcp-card" style="border-color:#6366f1;background:#1a1d27;">
-        <h3 style="color:#6366f1;">🟣 Jira MCP — port 8104</h3>
-        <p style="font-size:13px;color:#8892b0;margin-bottom:12px;">Ticket management via Jira REST API</p>
+      <div class="adapter-card" style="border-color:#6366f1;background:#1a1d27;">
+        <h3 style="color:#6366f1;">🟣 Jira Adapter</h3>
+        <p style="font-size:13px;color:#8892b0;margin-bottom:4px;">adapters/integrations/jira.py</p>
+        <p style="font-size:12px;color:#546e7a;margin-bottom:12px;">Ticket management via Jira REST API (httpx)</p>
         <div class="tags">
           <span class="tag" style="background:rgba(99,102,241,.1);color:#6366f1;">create_ticket</span>
           <span class="tag" style="background:rgba(99,102,241,.1);color:#6366f1;">close_ticket</span>
@@ -537,9 +497,10 @@
         </div>
       </div>
 
-      <div class="mcp-card" style="border-color:#e11d48;background:#1a1d27;">
-        <h3 style="color:#e11d48;">🔴 Prometheus MCP — port 8105</h3>
-        <p style="font-size:13px;color:#8892b0;margin-bottom:12px;">Metrics queries via PromQL</p>
+      <div class="adapter-card" style="border-color:#e11d48;background:#1a1d27;">
+        <h3 style="color:#e11d48;">🔴 Prometheus Adapter</h3>
+        <p style="font-size:13px;color:#8892b0;margin-bottom:4px;">adapters/integrations/prometheus.py</p>
+        <p style="font-size:12px;color:#546e7a;margin-bottom:12px;">Metrics queries via PromQL over HTTP</p>
         <div class="tags">
           <span class="tag" style="background:rgba(225,29,72,.1);color:#e11d48;">prometheus_query</span>
           <span class="tag" style="background:rgba(225,29,72,.1);color:#e11d48;">prometheus_range_query</span>
@@ -549,9 +510,10 @@
         </div>
       </div>
 
-      <div class="mcp-card" style="border-color:#10b981;background:#1a1d27;">
-        <h3 style="color:#10b981;">🟢 Syslog MCP — port 8106</h3>
-        <p style="font-size:13px;color:#8892b0;margin-bottom:12px;">Log search via Loki / VictoriaLogs</p>
+      <div class="adapter-card" style="border-color:#10b981;background:#1a1d27;">
+        <h3 style="color:#10b981;">🟢 Syslog Adapter</h3>
+        <p style="font-size:13px;color:#8892b0;margin-bottom:4px;">adapters/integrations/syslog.py</p>
+        <p style="font-size:12px;color:#546e7a;margin-bottom:12px;">Log search via Loki / VictoriaLogs HTTP API</p>
         <div class="tags">
           <span class="tag" style="background:rgba(16,185,129,.1);color:#10b981;">syslog_search</span>
           <span class="tag" style="background:rgba(16,185,129,.1);color:#10b981;">syslog_search_device</span>
@@ -562,6 +524,17 @@
       </div>
 
     </div>
+
+    <!-- Circuit Breaker callout -->
+    <div class="card card-accent" style="margin-top:24px;">
+      <h3>Circuit Breaker — Per-Device Resilience</h3>
+      <p style="font-size:14px;">Every device call goes through <code style="color:var(--accent);background:#0d1117;padding:1px 6px;border-radius:4px;">adapters/devices/pool.py</code>. If a device fails 3 times in a row, its circuit opens for 60 seconds — all further calls are rejected immediately without blocking a thread. The circuit moves to HALF_OPEN after the timeout and allows one probe call to test recovery.</p>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;">
+        <span style="font-size:13px;color:var(--green);">● CLOSED — normal operation</span>
+        <span style="font-size:13px;color:var(--red);">● OPEN — failing fast, 60s timeout</span>
+        <span style="font-size:13px;color:var(--yellow);">● HALF_OPEN — one probe allowed</span>
+      </div>
+    </div>
   </section>
 
   <!-- TOOL SELECTION LOGIC -->
@@ -570,14 +543,14 @@
     <div class="grid grid-2">
       <div class="card">
         <h3>Single tool — direct query</h3>
-        <p style="font-size:14px;">User asks about one specific thing. No playbook match. LLM picks the single most relevant tool.</p>
+        <p style="font-size:14px;">User asks about one specific thing. LLM picks the most relevant tool based on the vendor-prefixed tool name and the device's registered vendor in devices.yaml.</p>
         <pre><code><span class="cm">-- Query --</span>
 <span class="str">"show ge-0/0/0 status on srx"</span>
 
 <span class="cm">-- LLM reasoning --</span>
-srx → Juniper (from inventory)
+srx → vendor=junos (from devices.yaml)
 <span class="str">"status"</span> + single interface
-→ <span class="fn">get_interface_health</span>(
+→ <span class="fn">junos_get_interface_health</span>(
     device=<span class="str">"srx"</span>,
     interface=<span class="str">"ge-0/0/0"</span>
   )</code></pre>
@@ -585,7 +558,7 @@ srx → Juniper (from inventory)
 
       <div class="card">
         <h3>Multiple tools — playbook match</h3>
-        <p style="font-size:14px;">User reports a known scenario. LLM matches to a playbook and runs all steps in sequence.</p>
+        <p style="font-size:14px;">User reports a known scenario. System prompt includes the playbook list. LLM calls <code style="color:var(--accent);background:#0d1117;padding:1px 5px;border-radius:4px;">run_playbook</code>, which executes all steps in sequence.</p>
         <pre><code><span class="cm">-- Query --</span>
 <span class="str">"ge-0/0/0 is down on srx"</span>
 
@@ -593,9 +566,9 @@ srx → Juniper (from inventory)
 steps: [get_interface_health,
         get_link_health]
 
-<span class="cm">-- LLM calls both --</span>
-<span class="fn">get_interface_health</span>(srx, ge-0/0/0)
-<span class="fn">get_link_health</span>(srx, ge-0/0/0)</code></pre>
+<span class="cm">-- Runner calls both --</span>
+<span class="fn">junos_get_interface_health</span>(srx, ge-0/0/0)
+<span class="fn">junos_get_link_health</span>(srx, ge-0/0/0)</code></pre>
       </div>
     </div>
   </section>
@@ -603,7 +576,7 @@ steps: [get_interface_health,
   <!-- PLAYBOOKS -->
   <section id="playbooks">
     <h2>Playbooks — NOC Runbooks as YAML</h2>
-    <p>Playbooks map known network problem patterns to tool sequences. Adding a new playbook requires zero code changes — just add a YAML entry.</p>
+    <p>Playbooks map known network problem patterns to tool sequences. Adding a new playbook requires zero code changes — just add a YAML entry to <code style="color:var(--accent);background:#0d1117;padding:1px 6px;border-radius:4px;">playbooks/playbooks.yaml</code> and reload.</p>
 
     <div class="grid grid-3" style="margin-top:24px;">
       <div class="card" style="border-color:#f87171;">
@@ -680,54 +653,59 @@ steps: [get_interface_health,
           <tr>
             <th>Aspect</th>
             <th>v1 — Monolith</th>
-            <th>v2 — MCP Architecture</th>
+            <th>v2 — Adapter Architecture</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Tool location</strong></td>
-            <td class="td-old">Hardcoded in app.py (if-elif blocks)</td>
-            <td class="td-new">Separate MCP servers, discovered at startup</td>
+            <td><strong>Tool dispatch</strong></td>
+            <td class="td-old">Hardcoded if-elif blocks in app.py</td>
+            <td class="td-new">ToolDispatcher routes by vendor prefix to in-process adapters</td>
           </tr>
           <tr>
             <td><strong>Adding a vendor</strong></td>
-            <td class="td-old">Edit core app.py + tools/*.py files</td>
-            <td class="td-new">Deploy a new MCP server — zero changes to app.py</td>
+            <td class="td-old">Edit core app.py + tools/*.py</td>
+            <td class="td-new">Add adapters/devices/newvendor.py — zero changes to app.py</td>
+          </tr>
+          <tr>
+            <td><strong>Device connections</strong></td>
+            <td class="td-old">New SSH connection per tool call</td>
+            <td class="td-new">Connection pool with 60s TTL + per-device circuit breaker</td>
           </tr>
           <tr>
             <td><strong>LLM provider</strong></td>
             <td class="td-old">OpenAI only, hardcoded</td>
-            <td class="td-new">OpenAI / Claude / Local LLM — switchable from UI</td>
+            <td class="td-new">OpenAI / Claude / Local LLM — switchable from Settings UI</td>
           </tr>
           <tr>
             <td><strong>Credentials</strong></td>
             <td class="td-old">Environment variables only (restart required)</td>
-            <td class="td-new">Settings UI → saved to SQLite, read at connect time</td>
+            <td class="td-new">Settings UI → SQLite, read at connect time. Vault for prod.</td>
           </tr>
           <tr>
             <td><strong>Device inventory</strong></td>
             <td class="td-old">LLM had to guess or ask the user</td>
-            <td class="td-new">Injected from devices.yaml into every prompt</td>
+            <td class="td-new">devices.yaml injected into every prompt, vendor auto-detected</td>
           </tr>
           <tr>
             <td><strong>Authentication</strong></td>
             <td class="td-old">API keys only</td>
-            <td class="td-new">Auth0 login + role-based tool access</td>
+            <td class="td-new">Auth0 SSO + role-based tool access (admin / noc / noc-ticket)</td>
           </tr>
           <tr>
-            <td><strong>CLI parsing</strong></td>
-            <td class="td-old">Regex parsers on raw SSH output (fragile)</td>
-            <td class="td-new">NETCONF → structured XML → PyEZ (reliable)</td>
+            <td><strong>Conversation memory</strong></td>
+            <td class="td-old">Stateless — no history between requests</td>
+            <td class="td-new">Tool results saved to memory.db, available in follow-up turns</td>
           </tr>
           <tr>
             <td><strong>Playbooks</strong></td>
             <td class="td-old">Not supported</td>
-            <td class="td-new">YAML runbooks — editable from admin UI</td>
+            <td class="td-new">YAML runbooks — editable from admin UI, zero code changes</td>
           </tr>
           <tr>
             <td><strong>Observability</strong></td>
             <td class="td-old">Basic logging</td>
-            <td class="td-new">Structured JSON audit logs + /metrics endpoint</td>
+            <td class="td-new">Structured JSON audit logs, /metrics endpoint, /health/llm</td>
           </tr>
         </tbody>
       </table>
@@ -736,7 +714,7 @@ steps: [get_interface_health,
 
   <!-- FOOTER -->
   <div style="text-align:center;padding:40px 0 20px;border-top:1px solid #2e3352;color:#546e7a;font-size:13px;">
-    NetCopilot v2.0 · MCP Architecture · Built with FastAPI + Claude Sonnet
+    NetCopilot v2.0 · Direct Adapter Architecture · Built with FastAPI + Claude / GPT-4
   </div>
 
 </div>
