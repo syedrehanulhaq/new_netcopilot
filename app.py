@@ -880,11 +880,15 @@ async def _run_chat(message: str, user: str, role: str) -> dict:
     logger.info("[request %s] /chat end ms=%d", request_id, total_ms)
 
     # Collect tool results so they're available in future turns for ticket creation, etc.
+    # Truncate each result to 800 chars to keep memory tokens bounded.
+    _TOOL_RESULT_MAX = 800
     tool_findings: list[str] = []
     for m in messages:
         if isinstance(m, dict) and m.get("role") == "tool":
             name = m.get("name", "tool")
             content = m.get("content", "")
+            if len(content) > _TOOL_RESULT_MAX:
+                content = content[:_TOOL_RESULT_MAX] + "…[truncated]"
             tool_findings.append(f"[{name}]: {content}")
 
     if tool_findings:
@@ -1013,10 +1017,14 @@ async def chat_stream(req: ChatRequest, request: Request):
             yield f"data: {json.dumps(event)}\n\n"
         yield f'data: {json.dumps({"type": "done"})}\n\n'
         if reply:
+            _TOOL_RESULT_MAX = 800
             tool_findings: list[str] = []
             for m in messages:
                 if isinstance(m, dict) and m.get("role") == "tool":
-                    tool_findings.append(f"[{m.get('name', 'tool')}]: {m.get('content', '')}")
+                    content = m.get("content", "")
+                    if len(content) > _TOOL_RESULT_MAX:
+                        content = content[:_TOOL_RESULT_MAX] + "…[truncated]"
+                    tool_findings.append(f"[{m.get('name', 'tool')}]: {content}")
             if tool_findings:
                 enriched_reply = (
                     "Investigation findings (tool outputs):\n"

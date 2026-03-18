@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import threading
+import time
 from contextlib import contextmanager
 from typing import Any, Callable, Optional
 
@@ -25,39 +27,91 @@ from adapters.devices.pool import get_pool, CircuitOpenError
 logger = logging.getLogger("netcopilot.adapters.nokia")
 
 # ---------------------------------------------------------------------------
-# Connection helper (synchronous — runs inside executor)
+# SSH connection cache — reuse sessions instead of reconnecting each tool call
 # ---------------------------------------------------------------------------
+
+_SSH_TTL = 90.0
+_SSH_MAX_CACHED = 20
+
+_conn_cache: dict[str, tuple[Any, float]] = {}
+_conn_lock = threading.Lock()
+
+
+def _get_cached_ssh(device_name: str):
+    with _conn_lock:
+        entry = _conn_cache.get(device_name)
+        if entry is None:
+            return None
+        conn, last_used = entry
+        if time.monotonic() - last_used > _SSH_TTL:
+            _conn_cache.pop(device_name, None)
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+            return None
+        _conn_cache[device_name] = (conn, time.monotonic())
+        return conn
+
+
+def _put_cached_ssh(device_name: str, conn) -> None:
+    with _conn_lock:
+        if len(_conn_cache) >= _SSH_MAX_CACHED and device_name not in _conn_cache:
+            oldest = min(_conn_cache, key=lambda k: _conn_cache[k][1])
+            old_conn, _ = _conn_cache.pop(oldest)
+            try:
+                old_conn.disconnect()
+            except Exception:
+                pass
+        _conn_cache[device_name] = (conn, time.monotonic())
+
+
+def _evict_ssh(device_name: str) -> None:
+    with _conn_lock:
+        entry = _conn_cache.pop(device_name, None)
+    if entry:
+        try:
+            entry[0].disconnect()
+        except Exception:
+            pass
+
 
 @contextmanager
 def _ssh(device_name: str):
-    """Open a Netmiko SSH session to a Nokia SR OS device."""
+    """Yield a Netmiko SSH session, reusing a cached connection when available."""
     from netmiko import ConnectHandler
 
-    host, port = resolve_host(device_name)
-    user = get_secret("NOKIA_USER", "")
-    passwd = get_secret("NOKIA_PASS", "")
-    if not user or not passwd:
-        raise RuntimeError("NOKIA_USER or NOKIA_PASS not configured.")
+    conn = _get_cached_ssh(device_name)
+    fresh = conn is None
 
-    params: dict[str, Any] = {
-        "device_type": "nokia_sros",
-        "host": host,
-        "username": user,
-        "password": passwd,
-        "fast_cli": False,
-        "conn_timeout": int(get_secret("NETCONF_TIMEOUT", "30")),
-    }
-    if port:
-        params["port"] = port
+    if fresh:
+        host, port = resolve_host(device_name)
+        user = get_secret("NOKIA_USER", "")
+        passwd = get_secret("NOKIA_PASS", "")
+        if not user or not passwd:
+            raise RuntimeError("NOKIA_USER or NOKIA_PASS not configured.")
 
-    conn = ConnectHandler(**params)
+        params: dict[str, Any] = {
+            "device_type": "nokia_sros",
+            "host": host,
+            "username": user,
+            "password": passwd,
+            "fast_cli": True,
+            "conn_timeout": int(get_secret("NETCONF_TIMEOUT", "30")),
+        }
+        if port:
+            params["port"] = port
+        conn = ConnectHandler(**params)
+        logger.debug("SSH new connection to %s", device_name)
+    else:
+        logger.debug("SSH reusing cached connection to %s", device_name)
+
     try:
         yield conn
-    finally:
-        try:
-            conn.disconnect()
-        except Exception:
-            pass
+        _put_cached_ssh(device_name, conn)
+    except Exception:
+        _evict_ssh(device_name)
+        raise
 
 
 def _cli(device: str, command: str) -> str:
