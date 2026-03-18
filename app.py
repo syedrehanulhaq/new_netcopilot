@@ -1164,16 +1164,29 @@ async def slack_command(request: Request):
                         channel_key = channel_id or channel_name or "default"
                         _save_alert(channel_key, "analysis", {"analysis": reply_text})
                 elif ticket_payload and _dispatcher:
-                    ticket_result = loop.run_until_complete(
-                        _dispatcher.call_tool("jira_create_ticket", ticket_payload)
-                    )
-                    if "error" not in ticket_result:
-                        reply_text = (
-                            f"Ticket created: {ticket_result.get('ticket_id')} "
-                            f"{ticket_result.get('ticket_url', '')}".strip()
+                    # Route through _run_chat so the LLM has access to the
+                    # prior investigation in memory and fills the description
+                    # correctly — direct dispatcher.call_tool bypasses the LLM
+                    # and produces empty/incomplete ticket descriptions.
+                    channel_key = channel_id or channel_name or "default"
+                    analysis = _get_latest_analysis(channel_key)
+                    if analysis:
+                        ticket_prompt = (
+                            f"Create a Jira ticket for the investigation you just completed. "
+                            f"The ticket summary should be: {ticket_payload.get('summary', 'Network incident')}. "
+                            f"Fill the description with all investigation findings, evidence, "
+                            f"severity, and recommended next steps from the investigation."
                         )
                     else:
-                        reply_text = f"Ticket creation failed: {ticket_result.get('error')}"
+                        ticket_prompt = (
+                            f"Create a Jira ticket: summary={ticket_payload.get('summary', 'Network incident')}, "
+                            f"description={ticket_payload.get('description', '')}, "
+                            f"priority={ticket_payload.get('priority', 'Medium')}."
+                        )
+                    ticket_result = loop.run_until_complete(
+                        _run_chat(ticket_prompt, user_name, SLACK_ROLE)
+                    )
+                    reply_text = ticket_result.get("reply", "Ticket creation failed.")
                 else:
                     result = loop.run_until_complete(_run_chat(text, user_name, SLACK_ROLE))
                     reply_text = result["reply"]
