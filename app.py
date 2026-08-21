@@ -17,9 +17,10 @@ from contextlib import asynccontextmanager
 from typing import Any, Optional
 from urllib.parse import parse_qs
 
+import httpx
 import yaml
-from fastapi import FastAPI, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
@@ -1070,11 +1071,16 @@ async def ingest_alert(req: AlertIngestRequest, request: Request):
             ],
         )
     ).strip()
-    slack_msg = f"ALERT: {req.text}{' (' + details + ')' if details else ''}\nRun `/netcopilot investigate` to analyze."
-
     slack_error = None
     if channel != "default":
-        slack_error = _post_slack_message(channel, slack_msg)
+        adapter = get_slack_adapter()
+        slack_error = adapter.send_alert_with_button(
+            channel=channel,
+            alert_text=req.text,
+            device=req.device or "",
+            interface=req.interface or "",
+            severity=req.severity or "",
+        )
     return {"status": "ok", "channel": channel, "slack_error": slack_error}
 
 
@@ -1233,6 +1239,190 @@ async def slack_command(request: Request):
 
     result = await _run_chat(text, user_name, SLACK_ROLE)
     return {"response_type": "in_channel", "text": result["reply"]}
+
+
+@app.post("/slack/actions")
+async def slack_actions(request: Request, background_tasks: BackgroundTasks):
+    """
+    Handle Slack interactive component callbacks (button clicks).
+    Slack requires a response within 3 seconds — we ack immediately and
+    do all work in a BackgroundTask that posts back via response_url.
+
+    Supported action_ids:
+      - netcopilot_investigate   → runs investigation on the alert
+      - netcopilot_create_ticket → creates a Jira ticket from the alert
+    """
+    # Read body FIRST — Slack disconnects after 3s and starlette raises
+    # ClientDisconnect if we do anything blocking before reading.
+    try:
+        raw_body = await request.body()
+    except Exception:
+        return JSONResponse({"text": "ok"}, status_code=200)
+    raw_str = raw_body.decode("utf-8")
+
+    _enforce_rate_limit("slack-actions")
+
+    # Verify Slack signature
+    signature = request.headers.get("X-Slack-Signature", "")
+    timestamp  = request.headers.get("X-Slack-Request-Timestamp", "")
+    if SLACK_SIGNING_SECRET:
+        try:
+            digest = hmac.new(
+                SLACK_SIGNING_SECRET.encode("utf-8"),
+                f"v0:{timestamp}:{raw_str}".encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(f"v0={digest}", signature):
+                raise HTTPException(status_code=403, detail="Invalid Slack signature.")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=403, detail="Signature verification failed.")
+
+    form = parse_qs(raw_str)
+    payload_str = (form.get("payload") or ["{}"])[0]
+    try:
+        payload = json.loads(payload_str)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid payload JSON.")
+
+    actions      = payload.get("actions", [])
+    user_info    = payload.get("user", {})
+    user_name    = user_info.get("username") or user_info.get("name") or "slack"
+    response_url = payload.get("response_url", "")
+    channel      = (payload.get("channel") or {}).get("id", "") or SLACK_ALERT_CHANNEL or "default"
+
+    if not actions:
+        return JSONResponse({"ok": True})
+
+    action    = actions[0]
+    action_id = action.get("action_id", "")
+    value     = action.get("value", "")
+
+    # value format: "device|interface|severity|alert_text"
+    parts      = value.split("|", 3)
+    device     = parts[0] if len(parts) > 0 else ""
+    interface  = parts[1] if len(parts) > 1 else ""
+    severity   = parts[2] if len(parts) > 2 else ""
+    alert_text = parts[3] if len(parts) > 3 else value
+
+    async def _do_action() -> None:
+        reply_text = "An error occurred."
+        try:
+            if action_id == "netcopilot_investigate":
+                context = alert_text
+                if device:    context += f" device={device}"
+                if interface: context += f" interface={interface}"
+                if severity:  context += f" severity={severity}"
+                # Reset circuit breaker so stale OPEN state doesn't block the investigation
+                if device:
+                    from adapters.devices.pool import get_pool
+                    get_pool().force_probe(device)
+                # Explicitly bypass run_playbook so the LLM calls device tools directly
+                # and returns precise data (or a specific error if SSH fails)
+                inv_prompt = (
+                    f"Investigate this alert. Call vendor device tools DIRECTLY — "
+                    f"do NOT use run_playbook. Use tools such as cisco_get_interface_health, "
+                    f"cisco_get_interface_status, cisco_get_interface_counters for Cisco devices. "
+                    f"Alert details: {context}"
+                )
+                result = await _run_chat(inv_prompt, user_name, SLACK_ROLE)
+                reply_text = result["reply"]
+                _save_alert(channel, "analysis", {"analysis": reply_text})
+
+                # Post findings with a Create Ticket button and return early
+                if response_url:
+                    try:
+                        adapter = get_slack_adapter()
+                        adapter.post_investigation_result(
+                            response_url=response_url,
+                            findings=reply_text,
+                            device=device,
+                            interface=interface,
+                            severity=severity,
+                            alert_text=alert_text,
+                        )
+                    except Exception:
+                        logger.exception("Failed to post investigation result with button.")
+                return
+
+            elif action_id == "netcopilot_create_ticket":
+                analysis = _get_latest_analysis(channel)
+
+                # If no analysis or analysis is incomplete (SSH failed etc),
+                # run a fresh investigation first so the ticket has real data
+                _incomplete_markers = (
+                    "unable to retrieve",
+                    "no health data",
+                    "connection error",
+                    "ssh",
+                    "not enough data",
+                    "no detailed health",
+                    "could not",
+                    "failed to",
+                    "no specific evidence",
+                    "automated playbook ran",
+                    "no supporting device data",
+                    "circuit is open",
+                )
+                analysis_incomplete = (
+                    not analysis
+                    or any(m in analysis.lower() for m in _incomplete_markers)
+                )
+
+                if analysis_incomplete:
+                    # Re-investigate then ticket in one LLM call
+                    context = alert_text
+                    if device:    context += f" device={device}"
+                    if interface: context += f" interface={interface}"
+                    if severity:  context += f" severity={severity}"
+                    if device:
+                        from adapters.devices.pool import get_pool
+                        get_pool().force_probe(device)
+                    inv_result = await _run_chat(
+                        f"Investigate this alert. Call vendor device tools DIRECTLY — "
+                        f"do NOT use run_playbook. Alert details: {context}",
+                        user_name, SLACK_ROLE,
+                    )
+                    _save_alert(channel, "analysis", {"analysis": inv_result["reply"]})
+                    ticket_prompt = (
+                        f"Based on the investigation you just completed, create a Jira ticket. "
+                        f"Alert: {alert_text} (device={device}, interface={interface}, severity={severity}). "
+                        f"Use the investigation findings above for the description."
+                    )
+                else:
+                    ticket_prompt = (
+                        f"Create a Jira ticket for the investigation you just completed. "
+                        f"Alert: {alert_text} (device={device}, interface={interface}, severity={severity}). "
+                        f"Fill the description with all investigation findings, evidence, severity, and next steps."
+                    )
+
+                result = await _run_chat(ticket_prompt, user_name, SLACK_ROLE)
+                reply_text = result.get("reply", "Ticket creation failed.")
+        except Exception:
+            logger.exception("Slack action handler failed.")
+
+        if response_url:
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.post(
+                        response_url,
+                        json={"response_type": "in_channel", "text": reply_text},
+                    )
+            except Exception:
+                logger.exception("Slack action response_url post failed.")
+
+    background_tasks.add_task(_do_action)
+
+    # Immediate ack — must be within 3 seconds
+    if action_id == "netcopilot_investigate":
+        ack = "🔍 Investigating alert..."
+    elif action_id == "netcopilot_create_ticket":
+        ack = "🎫 Creating ticket..."
+    else:
+        ack = "Working on it..."
+
+    return JSONResponse({"response_type": "ephemeral", "text": ack})
 
 
 # ---------------------------------------------------------------------------

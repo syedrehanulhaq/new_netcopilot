@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetCopilot — Security Guardrails</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3352;
+    --accent: #6c8ef5;
+    --accent2: #a78bfa;
+    --green: #34d399;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    --cyan: #22d3ee;
+    --orange: #fb923c;
+    --text: #e2e8f0;
+    --text-dim: #8892b0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; line-height: 1.6; }
+
+  nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 40px; display: flex; align-items: center; gap: 32px; position: sticky; top: 0; z-index: 100; }
+  .logo { font-size: 20px; font-weight: 700; color: var(--accent); padding: 16px 0; letter-spacing: -0.5px; }
+  .logo span { color: var(--accent2); }
+  nav a { color: var(--text-dim); text-decoration: none; font-size: 14px; padding: 20px 4px; border-bottom: 2px solid transparent; transition: all .2s; }
+  nav a:hover { color: var(--text); border-color: var(--accent); }
+  nav a.active { color: var(--text); border-color: var(--accent); }
+
+  .page { max-width: 1200px; margin: 0 auto; padding: 48px 40px; }
+  section { margin-bottom: 72px; scroll-margin-top: 80px; }
+  h1 { font-size: 34px; font-weight: 800; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px; }
+  h2 { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 20px; }
+  h3 { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+  p { color: var(--text-dim); font-size: 15px; margin-bottom: 12px; }
+  code { background: var(--surface2); border: 1px solid var(--border); padding: 2px 7px; border-radius: 4px; font-family: 'SF Mono', 'Consolas', monospace; font-size: 13px; color: var(--cyan); }
+
+  /* ── LAYERED DIAGRAM ── */
+  .diagram { display: flex; flex-direction: column; gap: 0; border-radius: 16px; overflow: hidden; border: 1px solid var(--border); }
+  .layer { display: flex; align-items: stretch; border-bottom: 1px solid var(--border); }
+  .layer:last-child { border-bottom: none; }
+  .layer-label { width: 180px; min-width: 180px; padding: 20px 20px; background: var(--surface2); display: flex; flex-direction: column; justify-content: center; border-right: 1px solid var(--border); }
+  .layer-label .num { font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .layer-label .name { font-size: 14px; font-weight: 700; color: var(--text); }
+  .layer-body { flex: 1; padding: 20px 24px; background: var(--surface); display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+
+  .badge { display: flex; align-items: flex-start; gap: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; min-width: 200px; max-width: 280px; flex: 1; }
+  .badge-icon { font-size: 20px; line-height: 1; margin-top: 2px; flex-shrink: 0; }
+  .badge-text .title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 3px; }
+  .badge-text .desc { font-size: 12px; color: var(--text-dim); line-height: 1.4; }
+  .badge-text .value { font-size: 11px; color: var(--green); margin-top: 4px; font-weight: 600; }
+
+  .badge.green { border-color: rgba(52,211,153,.3); }
+  .badge.blue { border-color: rgba(108,142,245,.3); }
+  .badge.yellow { border-color: rgba(251,191,36,.3); }
+  .badge.red { border-color: rgba(248,113,113,.3); }
+  .badge.purple { border-color: rgba(167,139,250,.3); }
+  .badge.cyan { border-color: rgba(34,211,238,.3); }
+  .badge.orange { border-color: rgba(251,146,60,.3); }
+
+  /* ── FLOW DIAGRAM ── */
+  .flow { display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
+  .flow-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; text-align: center; min-width: 120px; }
+  .flow-box .fb-title { font-size: 13px; font-weight: 700; color: var(--text); }
+  .flow-box .fb-sub { font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+  .flow-arrow { font-size: 20px; color: var(--text-dim); padding: 0 8px; }
+  .flow-check { font-size: 11px; color: var(--green); font-weight: 600; margin-top: 4px; }
+  .flow-block { font-size: 11px; color: var(--red); font-weight: 600; margin-top: 4px; }
+
+  /* ── ROLE TABLE ── */
+  .role-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .role-table th { background: var(--surface2); color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+  .role-table td { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .role-table tr:last-child td { border-bottom: none; }
+  .role-table tr:hover td { background: var(--surface2); }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; margin: 1px; }
+  .pill-green { background: rgba(52,211,153,.15); color: var(--green); border: 1px solid rgba(52,211,153,.3); }
+  .pill-red { background: rgba(248,113,113,.15); color: var(--red); border: 1px solid rgba(248,113,113,.3); }
+  .pill-yellow { background: rgba(251,191,36,.15); color: var(--yellow); border: 1px solid rgba(251,191,36,.3); }
+  .pill-blue { background: rgba(108,142,245,.15); color: var(--accent); border: 1px solid rgba(108,142,245,.3); }
+
+  /* ── CREDENTIAL FLOW ── */
+  .cred-flow { display: flex; flex-direction: column; gap: 0; }
+  .cred-step { display: flex; align-items: center; gap: 16px; padding: 16px 20px; border: 1px solid var(--border); background: var(--surface2); }
+  .cred-step:first-child { border-radius: 10px 10px 0 0; }
+  .cred-step:last-child { border-radius: 0 0 10px 10px; border-top: none; }
+  .cred-step:not(:first-child) { border-top: none; }
+  .cred-num { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+  .cred-num-1 { background: rgba(52,211,153,.2); color: var(--green); border: 1px solid rgba(52,211,153,.4); }
+  .cred-num-2 { background: rgba(108,142,245,.2); color: var(--accent); border: 1px solid rgba(108,142,245,.4); }
+  .cred-num-3 { background: rgba(251,191,36,.2); color: var(--yellow); border: 1px solid rgba(251,191,36,.4); }
+  .cred-info { flex: 1; }
+  .cred-info .ctitle { font-size: 14px; font-weight: 700; color: var(--text); }
+  .cred-info .cdesc { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .cred-tag { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; }
+  .cred-tag-green { background: rgba(52,211,153,.15); color: var(--green); }
+  .cred-tag-blue { background: rgba(108,142,245,.15); color: var(--accent); }
+  .cred-tag-yellow { background: rgba(251,191,36,.15); color: var(--yellow); }
+  .cred-arrow { text-align: center; color: var(--text-dim); font-size: 18px; padding: 4px 0; }
+
+  /* ── CIRCUIT BREAKER ── */
+  .cb-states { display: flex; gap: 16px; flex-wrap: wrap; }
+  .cb-state { flex: 1; min-width: 200px; border-radius: 12px; padding: 20px; border: 1px solid var(--border); }
+  .cb-state.closed { background: rgba(52,211,153,.07); border-color: rgba(52,211,153,.3); }
+  .cb-state.open { background: rgba(248,113,113,.07); border-color: rgba(248,113,113,.3); }
+  .cb-state.half { background: rgba(251,191,36,.07); border-color: rgba(251,191,36,.3); }
+  .cb-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+  .cb-state.closed .cb-title { color: var(--green); }
+  .cb-state.open .cb-title { color: var(--red); }
+  .cb-state.half .cb-title { color: var(--yellow); }
+  .cb-desc { font-size: 13px; color: var(--text-dim); margin-bottom: 10px; }
+  .cb-trigger { font-size: 12px; padding: 6px 10px; border-radius: 6px; }
+  .cb-state.closed .cb-trigger { background: rgba(52,211,153,.1); color: var(--green); }
+  .cb-state.open .cb-trigger { background: rgba(248,113,113,.1); color: var(--red); }
+  .cb-state.half .cb-trigger { background: rgba(251,191,36,.1); color: var(--yellow); }
+
+  /* ── SUMMARY CARDS ── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+  .card { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .card-icon { font-size: 28px; margin-bottom: 10px; }
+  .card-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .card-desc { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+
+  .tag { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+  .tag-green { background: rgba(52,211,153,.15); color: var(--green); border: 1px solid rgba(52,211,153,.3); }
+  .tag-red { background: rgba(248,113,113,.15); color: var(--red); border: 1px solid rgba(248,113,113,.3); }
+  .tag-blue { background: rgba(108,142,245,.15); color: var(--accent); border: 1px solid rgba(108,142,245,.3); }
+  .tag-yellow { background: rgba(251,191,36,.15); color: var(--yellow); border: 1px solid rgba(251,191,36,.3); }
+
+  .separator { height: 1px; background: var(--border); margin: 12px 0; }
+  .subtitle { color: var(--text-dim); font-size: 16px; margin-bottom: 40px; }
+  .section-label { font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 14px; }
+
+  @media (max-width: 768px) {
+    .page { padding: 24px 16px; }
+    .layer-label { width: 120px; min-width: 120px; }
+    nav { padding: 0 16px; gap: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">Net<span>Copilot</span></div>
+  <a href="architecture.html">Architecture</a>
+  <a href="security.html" class="active">Security</a>
+  <a href="netcopilot_explained.md">Docs</a>
+</nav>
+
+<div class="page">
+
+  <h1>Security Guardrails</h1>
+  <p class="subtitle">Eight independent layers of defence — from the internet edge to device credentials.</p>
+
+  <!-- ── SECTION 1: LAYERED OVERVIEW ── -->
+  <section id="layers">
+    <h2>Defence-in-Depth Overview</h2>
+    <p>Every request passes through eight security layers in order. A failure at any layer blocks the request — it never reaches the next layer.</p>
+
+    <div class="diagram" style="margin-top:24px;">
+
+      <div class="layer">
+        <div class="layer-label">
+          <div class="num">Layer 1</div>
+          <div class="name">Transport Security</div>
+        </div>
+        <div class="layer-body">
+          <div class="badge cyan">
+            <div class="badge-icon">🔒</div>
+            <div class="badge-text">
+              <div class="title">TLS / HTTPS</div>
+              <div class="desc">All traffic encrypted in transit via nginx + Let's Encrypt</div>
+              <div class="value">TLS 1.2+ enforced</div>
+            </div>
+          </div>
+          <div class="badge cyan">
+            <div class="badge-icon">🛡️</div>
+            <div class="badge-text">
+              <div class="title">HTTP Security Headers</div>
+              <div class="desc">Applied to every response by middleware</div>
+              <div class="value">X-Frame-Options: DENY · nosniff · XSS-Protection · HSTS · Referrer-Policy</div>
+            </div>
+          </div>
+          <div class="badge cyan">
+            <div class="badge-icon">🚫</div>
+            <div class="badge-text">
+              <div class="title">Clickjacking Prevention</div>
+              <div class="desc">X-Frame-Options: DENY blocks the UI from being embedded in iframes</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer">
+        <div class="layer-label">
+          <div class="num">Layer 2</div>
+          <div class="name">Rate Limiting</div>
+        </div>
+        <div class="layer-body">
+          <div class="badge yellow">
+            <div class="badge-icon">⏱️</div>
+            <div class="badge-text">
+              <div class="title">Per-Client Rate Limit</div>
+              <div class="desc">Applies to web chat, Slack, Teams, and alert ingest</div>
+              <div class="value">60 requests / 60 seconds per IP / user</div>
+            </div>
+          </div>
+          <div class="badge yellow">
+            <div class="badge-icon">📊</div>
+            <div class="badge-text">
+              <div class="title">Memory-Bounded Tracker</div>
+              <div class="desc">Rate limit state is capped to prevent memory exhaustion under load</div>
+              <div class="value">Max 10,000 tracked clients</div>
+            </div>
+          </div>
+          <div class="badge yellow">
+            <div class="badge-icon">🔄</div>
+            <div class="badge-text">
+              <div class="title">Auto Eviction</div>
+              <div class="desc">Stale entries are evicted automatically — no memory leak</div>
+              <div class="value">HTTP 429 returned on breach</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer">
+        <div class="layer-label">
+          <div class="num">Layer 3</div>
+          <div class="name">Authentication</div>
+        </div>
+        <div class="layer-body">
+          <div class="badge green">
+            <div class="badge-icon">🔑</div>
+            <div class="badge-text">
+              <div class="title">SSO via Auth0</div>
+              <div class="desc">Users authenticate with corporate Google / Azure / Okta — no local passwords</div>
+              <div class="value">OAuth 2.0 + OIDC</div>
+            </div>
+          </div>
+          <div class="badge green">
+            <div class="badge-icon">🎫</div>
+            <div class="badge-text">
+              <div class="title">Signed Session Tokens</div>
+              <div class="desc">Sessions are cryptographically signed using SESSION_SECRET — tampering is detectable</div>
+              <div class="value">itsdangerous · HMAC-SHA256</div>
+            </div>
+          </div>
+          <div class="badge green">
+            <div class="badge-icon">🤖</div>
+            <div class="badge-text">
+              <div class="title">API Keys (Automation)</div>
+              <div class="desc">Pipelines authenticate with static API keys — each key is bound to a specific role</div>
+              <div class="value">key:role format in settings</div>
+            </div>
+          </div>
+          <div class="badge green">
+            <div class="badge-icon">📨</div>
+            <div class="badge-text">
+              <div class="title">Slack HMAC Verification</div>
+              <div class="desc">Every Slack request has its signature verified against SLACK_SIGNING_SECRET before processing</div>
+              <div class="value">v0= HMAC-SHA256 · replay-safe</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer">
+        <div class="layer-label">
+          <div class="num">Layer 4</div>
+          <div class="name">Authorisation (RBAC)</div>
+        </div>
+        <div class="layer-body">
+          <div class="badge blue">
+            <div class="badge-icon">👤</div>
+            <div class="badge-text">
+              <div class="title">Role: noc</div>
+              <div class="desc">Read-only diagnostics — interface health, routing, ping, traceroute</div>
+              <div class="value">Cannot create tickets · Cannot change settings</div>
+            </div>
+          </div>
+          <div class="badge blue">
+            <div class="badge-icon">🎫</div>
+            <div class="badge-text">
+              <div class="title">Role: noc-ticket</div>
+              <div class="desc">All diagnostic tools plus Jira ticket create / update / comment</div>
+              <div class="value">Cannot change settings</div>
+            </div>
+          </div>
+          <div class="badge blue">
+            <div class="badge-icon">⚙️</div>
+            <div class="badge-text">
+              <div class="title">Role: admin</div>
+              <div class="desc">Full access including settings, inventory, playbooks, and all integrations</div>
+              <div class="value">Restricted to named accounts</div>
+            </div>
+          </div>
+          <div class="badge blue">
+            <div class="badge-icon">🔧</div>
+            <div class="badge-text">
+              <div class="title">LLM Tool Filtering</div>
+              <div class="desc">The LLM only sees tools permitted for the user's role — filtered at dispatch time</div>
+              <div class="value">Role checked on every request</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer">
+        <div class="layer-label">
+          <div class="num">Layer 5</div>
+          <div class="name">Input Validation</div>
+        </div>
+        <div class="layer-body">
+          <div class="badge orange">
+            <div class="badge-icon">🔍</div>
+            <div class="badge-text">
+              <div class="title">Device Name Regex</div>
+              <div class="desc">Device names validated before any SSH connection is opened</div>
+              <div class="value">^[a-zA-Z0-9._-]&#123;1,64&#125;$ — injection impossible</div>
+            </div>
+          </div>
+          <div class="badge orange">
+            <div class="badge-icon">🌐</div>
+            <div class="badge-text">
+              <div class="title">Host / IP Regex</div>
+              <div class="desc">Hostname and IP fields validated during CSV device import</div>
+              <div class="value">^[a-zA-Z0-9._:-]&#123;1,255&#125;$</div>
+            </div>
+          </div>
+          <div class="badge orange">
+            <div class="badge-icon">📋</div>
+            <div class="badge-text">
+              <div class="title">YAML Injection Guard</div>
+              <div class="desc">CSV imports are field-validated before writing to devices.yaml — prevents YAML injection</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer">
+        <div class="layer-label">
+          <div class="num">Layer 6</div>
+          <div class="name">Device Protection</div>
+        </div>
+        <div class="layer-body">
+          <div class="badge red">
+            <div class="badge-icon">⚡</div>
+            <div class="badge-text">
+              <div class="title">Circuit Breaker</div>
+              <div class="desc">Faulty devices are automatically isolated after 3 consecutive failures</div>
+              <div class="value">3 failures → OPEN for 60s → HALF-OPEN probe</div>
+            </div>
+          </div>
+          <div class="badge red">
+            <div class="badge-icon">🕐</div>
+            <div class="badge-text">
+              <div class="title">Executor Timeout</div>
+              <div class="desc">All SSH and NETCONF calls are bounded — a hung device cannot block the server</div>
+              <div class="value">60s per device call · asyncio.wait_for</div>
+            </div>
+          </div>
+          <div class="badge red">
+            <div class="badge-icon">📦</div>
+            <div class="badge-text">
+              <div class="title">Pool Size Cap</div>
+              <div class="desc">Device connection pool is capped to prevent memory exhaustion</div>
+              <div class="value">Max 1,000 tracked devices</div>
+            </div>
+          </div>
+          <div class="badge red">
+            <div class="badge-icon">👁️</div>
+            <div class="badge-text">
+              <div class="title">Read-Only Commands</div>
+              <div class="desc">Only show / display commands are issued — no config push, no commit, no destructive ops</div>
+              <div class="value">By design — no write tools exist</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer">
+        <div class="layer-label">
+          <div class="num">Layer 7</div>
+          <div class="name">Credential Security</div>
+        </div>
+        <div class="layer-body">
+          <div class="badge purple">
+            <div class="badge-icon">🗄️</div>
+            <div class="badge-text">
+              <div class="title">Settings Database (Priority 1)</div>
+              <div class="desc">UI-updated credentials stored in SQLite settings.db — overrides .env so UI changes take effect immediately without restart</div>
+              <div class="value">settings.db → env vars</div>
+            </div>
+          </div>
+          <div class="badge purple">
+            <div class="badge-icon">📄</div>
+            <div class="badge-text">
+              <div class="title">Environment Variables (Fallback)</div>
+              <div class="desc">.env file used at initial setup or Docker deployments — git-ignored, never committed to version control</div>
+            </div>
+          </div>
+          <div class="badge purple">
+            <div class="badge-icon">🚿</div>
+            <div class="badge-text">
+              <div class="title">Error Scrubbing</div>
+              <div class="desc">Credentials are stripped from all error messages and logs before they leave the adapter</div>
+              <div class="value">_scrub_error() in all adapters</div>
+            </div>
+          </div>
+          <div class="badge purple">
+            <div class="badge-icon">🙈</div>
+            <div class="badge-text">
+              <div class="title">Log Redaction</div>
+              <div class="desc">Configurable field redaction in logs — password, token, api_key, secret redacted by default</div>
+              <div class="value">Extends via LOG_REDACTION_FIELDS</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer">
+        <div class="layer-label">
+          <div class="num">Layer 8</div>
+          <div class="name">Audit Trail</div>
+        </div>
+        <div class="layer-body">
+          <div class="badge green">
+            <div class="badge-icon">📝</div>
+            <div class="badge-text">
+              <div class="title">Tool Call Logging</div>
+              <div class="desc">Every device tool call is logged with timestamp, user, device, tool name, and duration</div>
+            </div>
+          </div>
+          <div class="badge green">
+            <div class="badge-icon">🎫</div>
+            <div class="badge-text">
+              <div class="title">Jira Ticket Tagging</div>
+              <div class="desc">All AI-raised tickets are tagged so teams can distinguish human vs AI-created tickets</div>
+            </div>
+          </div>
+          <div class="badge green">
+            <div class="badge-icon">🏥</div>
+            <div class="badge-text">
+              <div class="title">Health Endpoint</div>
+              <div class="desc">/health reports Vault status, adapter connectivity, and degraded modes — for monitoring</div>
+              <div class="value">vault_degraded flag · per-adapter status</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── SECTION 2: REQUEST FLOW ── -->
+  <section id="flow">
+    <h2>Request Flow — What Happens to Every Message</h2>
+    <p>This is the exact path every chat message takes from browser to device and back.</p>
+
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:32px; margin-top:20px; overflow-x:auto;">
+      <div class="flow" style="justify-content:flex-start; flex-wrap:wrap; gap:0;">
+
+        <div class="flow-box" style="border-color:rgba(34,211,238,.4);">
+          <div class="fb-title">Browser / Slack</div>
+          <div class="fb-sub">User message</div>
+        </div>
+        <div class="flow-arrow">→</div>
+
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:center;">
+          <div class="flow-box" style="border-color:rgba(251,191,36,.4);">
+            <div class="fb-title">Rate Limiter</div>
+            <div class="fb-sub">60 req/min</div>
+            <div class="flow-block">429 if exceeded</div>
+          </div>
+        </div>
+        <div class="flow-arrow">→</div>
+
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:center;">
+          <div class="flow-box" style="border-color:rgba(52,211,153,.4);">
+            <div class="fb-title">Auth Check</div>
+            <div class="fb-sub">Session / API key</div>
+            <div class="flow-block">403 if invalid</div>
+          </div>
+        </div>
+        <div class="flow-arrow">→</div>
+
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:center;">
+          <div class="flow-box" style="border-color:rgba(108,142,245,.4);">
+            <div class="fb-title">Role Resolved</div>
+            <div class="fb-sub">noc / noc-ticket / admin</div>
+            <div class="flow-check">Tools filtered by role</div>
+          </div>
+        </div>
+        <div class="flow-arrow">→</div>
+
+        <div class="flow-box" style="border-color:rgba(167,139,250,.4);">
+          <div class="fb-title">LLM (GPT-4o)</div>
+          <div class="fb-sub">Picks tools to call</div>
+          <div class="flow-check">Role-scoped tool list</div>
+        </div>
+        <div class="flow-arrow">→</div>
+
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:center;">
+          <div class="flow-box" style="border-color:rgba(251,146,60,.4);">
+            <div class="fb-title">Input Validation</div>
+            <div class="fb-sub">Device name regex</div>
+            <div class="flow-block">Error if invalid chars</div>
+          </div>
+        </div>
+        <div class="flow-arrow">→</div>
+
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:center;">
+          <div class="flow-box" style="border-color:rgba(248,113,113,.4);">
+            <div class="fb-title">Circuit Breaker</div>
+            <div class="fb-sub">Per device</div>
+            <div class="flow-block">Blocked if OPEN</div>
+          </div>
+        </div>
+        <div class="flow-arrow">→</div>
+
+        <div class="flow-box" style="border-color:rgba(34,211,238,.4);">
+          <div class="fb-title">Device SSH/NETCONF</div>
+          <div class="fb-sub">show commands only</div>
+          <div class="flow-check">60s timeout · read-only</div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SECTION 3: RBAC ── -->
+  <section id="rbac">
+    <h2>Role-Based Access Control</h2>
+    <p>Roles are assigned at login via Auth0 group claims or per API key. The LLM receives only the tools its role permits — a <code>noc</code> user cannot trigger ticket creation even by asking.</p>
+
+    <table class="role-table" style="margin-top:20px;">
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Who uses it</th>
+          <th>Device Tools</th>
+          <th>Jira Tickets</th>
+          <th>Prometheus / Syslog</th>
+          <th>Settings / Admin</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="pill pill-blue">noc</span></td>
+          <td style="color:var(--text-dim);font-size:13px;">NOC engineers (read-only shift)</td>
+          <td><span class="pill pill-green">✓ All 55 tools</span></td>
+          <td><span class="pill pill-red">✗ Blocked</span></td>
+          <td><span class="pill pill-green">✓ Query only</span></td>
+          <td><span class="pill pill-red">✗ Blocked</span></td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-yellow">noc-ticket</span></td>
+          <td style="color:var(--text-dim);font-size:13px;">NOC engineers (full shift)</td>
+          <td><span class="pill pill-green">✓ All 55 tools</span></td>
+          <td><span class="pill pill-green">✓ Create / Update / Comment</span></td>
+          <td><span class="pill pill-green">✓ Query only</span></td>
+          <td><span class="pill pill-red">✗ Blocked</span></td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-red">admin</span></td>
+          <td style="color:var(--text-dim);font-size:13px;">NetOps leads / platform team</td>
+          <td><span class="pill pill-green">✓ All 55 tools</span></td>
+          <td><span class="pill pill-green">✓ Full Jira access</span></td>
+          <td><span class="pill pill-green">✓ Full access</span></td>
+          <td><span class="pill pill-green">✓ Full access</span></td>
+        </tr>
+        <tr>
+          <td><span class="pill pill-blue">api-key</span></td>
+          <td style="color:var(--text-dim);font-size:13px;">Automation / monitoring pipelines</td>
+          <td colspan="4" style="color:var(--text-dim);font-size:13px;">Role assigned per key — any role above, set in settings</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ── SECTION 4: CIRCUIT BREAKER ── -->
+  <section id="circuit">
+    <h2>Circuit Breaker — Device Protection</h2>
+    <p>Prevents a sick or unreachable device from blocking the server or amplifying an outage. Each device has independent state.</p>
+
+    <div class="cb-states" style="margin-top:20px;">
+      <div class="cb-state closed">
+        <div class="cb-title">⬤ CLOSED — Normal</div>
+        <div class="cb-desc">Device is reachable. All calls go through. Success resets failure counter.</div>
+        <div class="cb-trigger">Transitions to OPEN after 3 consecutive failures</div>
+      </div>
+      <div class="cb-state open">
+        <div class="cb-title">⬤ OPEN — Isolated</div>
+        <div class="cb-desc">Device is blocked. All calls return an error immediately without attempting SSH. Server is protected.</div>
+        <div class="cb-trigger">Held for 60 seconds · then transitions to HALF-OPEN</div>
+      </div>
+      <div class="cb-state half">
+        <div class="cb-title">⬤ HALF-OPEN — Probing</div>
+        <div class="cb-desc">One test call is allowed through. If it succeeds, circuit closes. If it fails, circuit re-opens for another 60s.</div>
+        <div class="cb-trigger">Success → CLOSED · Failure → OPEN again</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SECTION 5: CREDENTIALS ── -->
+  <section id="credentials">
+    <h2>Credential Storage</h2>
+    <p>NetCopilot checks two sources in order. Settings DB wins over the .env file so credentials updated via the UI take effect immediately without a restart.</p>
+
+    <div class="cred-flow" style="margin-top:20px; max-width:600px;">
+      <div class="cred-step">
+        <div class="cred-num cred-num-1">1</div>
+        <div class="cred-info">
+          <div class="ctitle">Settings Database (settings.db)</div>
+          <div class="cdesc">Credentials saved via the NetCopilot Settings UI — stored in a local SQLite database, never committed to git, takes effect immediately without restart</div>
+        </div>
+        <div class="cred-tag cred-tag-green">HIGHEST PRIORITY</div>
+      </div>
+      <div class="cred-arrow">↓ only if not set in settings.db</div>
+      <div class="cred-step">
+        <div class="cred-num cred-num-2">2</div>
+        <div class="cred-info">
+          <div class="ctitle">Environment Variables / .env file</div>
+          <div class="cdesc">Set at deployment time — .env is git-ignored and never committed to version control. Useful for initial setup or Docker deployments via environment injection.</div>
+        </div>
+        <div class="cred-tag cred-tag-blue">FALLBACK</div>
+      </div>
+    </div>
+
+    <div style="margin-top:24px; background:var(--surface2); border:1px solid rgba(248,113,113,.3); border-radius:10px; padding:16px 20px;">
+      <div style="font-size:13px; font-weight:700; color:var(--red); margin-bottom:6px;">Credential Leak Prevention</div>
+      <div style="font-size:13px; color:var(--text-dim);">
+        All device adapters run <code>_scrub_error()</code> before returning any error — credentials are stripped from exception messages before they reach logs or API responses.
+        Log redaction additionally masks <code>password</code>, <code>token</code>, <code>api_key</code>, <code>secret</code>, and <code>authorization</code> fields in all structured log output.
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SECTION 6: WHAT THE LLM CANNOT DO ── -->
+  <section id="llm-limits">
+    <h2>What the LLM Cannot Do</h2>
+    <p>The most common question in demos. These are architectural constraints — not just guidelines.</p>
+
+    <div class="cards" style="margin-top:20px;">
+      <div class="card">
+        <div class="card-icon">🚫</div>
+        <div class="card-title">Cannot modify device config</div>
+        <div class="card-desc">No write tools exist. The LLM tool set contains only <code>show</code> / <code>display</code> commands. There is no <code>configure_terminal</code>, no <code>commit</code>, no destructive command.</div>
+      </div>
+      <div class="card">
+        <div class="card-icon">🚫</div>
+        <div class="card-title">Cannot invent device data</div>
+        <div class="card-desc">The LLM can only respond with what the device actually returned. It cannot fabricate interface states, BGP routes, or error counts — the tool call returns real CLI output.</div>
+      </div>
+      <div class="card">
+        <div class="card-icon">🚫</div>
+        <div class="card-title">Cannot exceed its role</div>
+        <div class="card-desc">A <code>noc</code> user asking "create a ticket" receives a filtered tool list with no Jira tools. The LLM cannot call a tool it was never given.</div>
+      </div>
+      <div class="card">
+        <div class="card-icon">🚫</div>
+        <div class="card-title">Cannot access unenrolled devices</div>
+        <div class="card-desc">Only devices listed in <code>devices.yaml</code> or the inventory integration are reachable. The LLM cannot SSH to an arbitrary IP.</div>
+      </div>
+      <div class="card">
+        <div class="card-icon">🚫</div>
+        <div class="card-title">Cannot bypass rate limits</div>
+        <div class="card-desc">Rate limiting applies at the HTTP layer before the LLM is invoked. A runaway automation loop is blocked at 60 requests/minute.</div>
+      </div>
+      <div class="card">
+        <div class="card-icon">🚫</div>
+        <div class="card-title">Cannot run unbounded tool loops</div>
+        <div class="card-desc">The agentic loop is hard-capped at 10 tool turns per conversation turn. The LLM cannot run indefinitely.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

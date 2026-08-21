@@ -8,8 +8,11 @@ __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
-dist/
-build/
+/dist/
+/build/
+
+# Node
+node_modules/
 
 # Credentials — never commit
 .env

@@ -25,6 +25,7 @@ _VENDOR_MODULES: dict[str, str] = {
     "cisco": "adapters.devices.cisco",
     "junos":  "adapters.devices.junos",
     "nokia":  "adapters.devices.nokia",
+    "aruba":  "adapters.devices.aruba",
 }
 
 # Integration prefix → module path (direct adapters)

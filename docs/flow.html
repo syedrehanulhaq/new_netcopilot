@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetCopilot — How It Works</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3352;
+    --accent: #6c8ef5;
+    --accent2: #a78bfa;
+    --green: #34d399;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    --cyan: #22d3ee;
+    --orange: #fb923c;
+    --text: #e2e8f0;
+    --dim: #8892b0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; }
+
+  nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 40px; display: flex; align-items: center; gap: 32px; position: sticky; top: 0; z-index: 100; }
+  .logo { font-size: 20px; font-weight: 700; color: var(--accent); padding: 16px 0; }
+  .logo span { color: var(--accent2); }
+  nav a { color: var(--dim); text-decoration: none; font-size: 14px; padding: 20px 4px; border-bottom: 2px solid transparent; transition: all .2s; }
+  nav a:hover, nav a.active { color: var(--text); border-color: var(--accent); }
+
+  .page { max-width: 1300px; margin: 0 auto; padding: 48px 40px; }
+  h1 { font-size: 32px; font-weight: 800; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px; }
+  .subtitle { color: var(--dim); font-size: 15px; margin-bottom: 48px; }
+  h2 { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 24px; }
+
+  /* ── MAIN FLOW ── */
+  .main-flow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    position: relative;
+  }
+
+  /* vertical spine */
+  .main-flow::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0; bottom: 0;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--accent), var(--accent2));
+    transform: translateX(-50%);
+    z-index: 0;
+  }
+
+  .flow-row {
+    display: flex;
+    align-items: flex-start;
+    width: 100%;
+    gap: 24px;
+    position: relative;
+    z-index: 1;
+    margin-bottom: 0;
+  }
+
+  /* alternating layout */
+  .flow-row.left  { flex-direction: row; }
+  .flow-row.right { flex-direction: row-reverse; }
+
+  .flow-spacer { flex: 1; }
+
+  .flow-node {
+    flex: 1;
+    max-width: 480px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 24px;
+    position: relative;
+  }
+  .flow-node.accent-blue  { border-color: rgba(108,142,245,.5); }
+  .flow-node.accent-green { border-color: rgba(52,211,153,.5); }
+  .flow-node.accent-purple{ border-color: rgba(167,139,250,.5); }
+  .flow-node.accent-yellow{ border-color: rgba(251,191,36,.5); }
+  .flow-node.accent-cyan  { border-color: rgba(34,211,238,.5); }
+  .flow-node.accent-red   { border-color: rgba(248,113,113,.5); }
+  .flow-node.accent-orange{ border-color: rgba(251,146,60,.5); }
+
+  .node-step { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .accent-blue   .node-step { color: var(--accent); }
+  .accent-green  .node-step { color: var(--green); }
+  .accent-purple .node-step { color: var(--accent2); }
+  .accent-yellow .node-step { color: var(--yellow); }
+  .accent-cyan   .node-step { color: var(--cyan); }
+  .accent-red    .node-step { color: var(--red); }
+  .accent-orange .node-step { color: var(--orange); }
+
+  .node-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .node-file  { font-size: 12px; color: var(--dim); margin-bottom: 10px; font-family: monospace; }
+  .node-file span { color: var(--cyan); }
+  .node-desc  { font-size: 13px; color: var(--dim); line-height: 1.6; }
+  .node-desc b { color: var(--text); font-weight: 600; }
+
+  .node-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .tag { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
+  .tag-green  { background: rgba(52,211,153,.12); color: var(--green); border: 1px solid rgba(52,211,153,.3); }
+  .tag-red    { background: rgba(248,113,113,.12); color: var(--red); border: 1px solid rgba(248,113,113,.3); }
+  .tag-blue   { background: rgba(108,142,245,.12); color: var(--accent); border: 1px solid rgba(108,142,245,.3); }
+  .tag-yellow { background: rgba(251,191,36,.12);  color: var(--yellow); border: 1px solid rgba(251,191,36,.3); }
+  .tag-cyan   { background: rgba(34,211,238,.12);  color: var(--cyan); border: 1px solid rgba(34,211,238,.3); }
+  .tag-purple { background: rgba(167,139,250,.12); color: var(--accent2); border: 1px solid rgba(167,139,250,.3); }
+  .tag-orange { background: rgba(251,146,60,.12);  color: var(--orange); border: 1px solid rgba(251,146,60,.3); }
+
+  /* centre dot on the spine */
+  .spine-dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 22px;
+    z-index: 2;
+    align-self: flex-start;
+  }
+  .dot-blue   { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .dot-green  { background: var(--green);  box-shadow: 0 0 8px var(--green); }
+  .dot-purple { background: var(--accent2);box-shadow: 0 0 8px var(--accent2); }
+  .dot-yellow { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+  .dot-cyan   { background: var(--cyan);   box-shadow: 0 0 8px var(--cyan); }
+  .dot-red    { background: var(--red);    box-shadow: 0 0 8px var(--red); }
+  .dot-orange { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
+
+  /* connector lines from node to spine */
+  .connector {
+    height: 2px;
+    flex: 0 0 60px;
+    margin-top: 28px;
+    align-self: flex-start;
+  }
+  .conn-blue   { background: linear-gradient(to right, rgba(108,142,245,.5), var(--accent)); }
+  .conn-green  { background: linear-gradient(to right, rgba(52,211,153,.5), var(--green)); }
+  .conn-purple { background: linear-gradient(to right, rgba(167,139,250,.5), var(--accent2)); }
+  .conn-yellow { background: linear-gradient(to right, rgba(251,191,36,.5), var(--yellow)); }
+  .conn-cyan   { background: linear-gradient(to right, rgba(34,211,238,.5), var(--cyan)); }
+  .conn-red    { background: linear-gradient(to right, rgba(248,113,113,.5), var(--red)); }
+  .conn-orange { background: linear-gradient(to right, rgba(251,146,60,.5), var(--orange)); }
+
+  /* right-side connectors (reversed gradient) */
+  .flow-row.right .conn-blue   { background: linear-gradient(to left, rgba(108,142,245,.5), var(--accent)); }
+  .flow-row.right .conn-green  { background: linear-gradient(to left, rgba(52,211,153,.5), var(--green)); }
+  .flow-row.right .conn-purple { background: linear-gradient(to left, rgba(167,139,250,.5), var(--accent2)); }
+  .flow-row.right .conn-yellow { background: linear-gradient(to left, rgba(251,191,36,.5), var(--yellow)); }
+  .flow-row.right .conn-cyan   { background: linear-gradient(to left, rgba(34,211,238,.5), var(--cyan)); }
+  .flow-row.right .conn-red    { background: linear-gradient(to left, rgba(248,113,113,.5), var(--red)); }
+  .flow-row.right .conn-orange { background: linear-gradient(to left, rgba(251,146,60,.5), var(--orange)); }
+
+  .gap { height: 32px; }
+
+  /* ── AGENTIC LOOP BOX ── */
+  .loop-box {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid rgba(167,139,250,.4);
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin: 40px 0;
+    position: relative;
+    z-index: 1;
+  }
+  .loop-label {
+    position: absolute;
+    top: -12px; left: 24px;
+    background: var(--bg);
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent2);
+  }
+  .loop-inner {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-wrap: wrap;
+  }
+  .loop-step {
+    flex: 1;
+    min-width: 150px;
+    text-align: center;
+    padding: 16px 12px;
+  }
+  .loop-step-icon { font-size: 24px; margin-bottom: 8px; }
+  .loop-step-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .loop-step-desc  { font-size: 12px; color: var(--dim); line-height: 1.4; }
+  .loop-arrow { font-size: 22px; color: var(--accent2); padding: 0 4px; flex-shrink: 0; }
+  .loop-cap {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 12px;
+    color: var(--dim);
+    margin-top: 16px;
+    text-align: center;
+  }
+  .loop-cap b { color: var(--accent2); }
+
+  /* ── PARALLEL TOOLS ── */
+  .parallel-box {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid rgba(34,211,238,.3);
+    border-radius: 14px;
+    padding: 24px 28px;
+    margin: 32px 0;
+    position: relative;
+    z-index: 1;
+  }
+  .parallel-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--cyan); margin-bottom: 16px;
+  }
+  .parallel-tools {
+    display: flex; gap: 12px; flex-wrap: wrap;
+  }
+  .ptool {
+    flex: 1; min-width: 140px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .ptool-name { font-size: 12px; font-weight: 700; color: var(--cyan); margin-bottom: 4px; font-family: monospace; }
+  .ptool-desc { font-size: 11px; color: var(--dim); }
+  .parallel-note { font-size: 12px; color: var(--dim); margin-top: 12px; }
+  .parallel-note b { color: var(--cyan); }
+
+  /* ── FILE MAP ── */
+  .filemap {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+    margin-top: 24px;
+  }
+  .fcard {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .fcard-name { font-size: 13px; font-weight: 700; font-family: monospace; color: var(--cyan); margin-bottom: 6px; }
+  .fcard-desc { font-size: 13px; color: var(--dim); line-height: 1.5; }
+  .fcard-desc b { color: var(--text); }
+
+  section { margin-bottom: 72px; scroll-margin-top: 80px; }
+  @media (max-width: 900px) {
+    .main-flow::before { display: none; }
+    .connector { display: none; }
+    .spine-dot { display: none; }
+    .flow-row, .flow-row.right { flex-direction: column; align-items: stretch; }
+    .flow-spacer { display: none; }
+    .flow-node { max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">Net<span>Copilot</span></div>
+  <a href="architecture.html">Architecture</a>
+  <a href="security.html">Security</a>
+  <a href="flow.html" class="active">How It Works</a>
+</nav>
+
+<div class="page">
+  <h1>End-to-End Request Flow</h1>
+  <p class="subtitle">What happens from the moment you type a question to the moment you get an answer.</p>
+
+  <!-- ═══ MAIN FLOW ═══ -->
+  <section id="flow">
+
+    <div class="main-flow">
+
+      <!-- STEP 1 -->
+      <div class="flow-row left">
+        <div class="flow-node accent-blue">
+          <div class="node-step">Step 1</div>
+          <div class="node-title">You type a question</div>
+          <div class="node-file">Interface: <span>Browser / Slack / Teams</span></div>
+          <div class="node-desc">
+            The web UI, Slack slash command, or Teams message sends a <b>POST /chat</b> request
+            to the NetCopilot server with your message and session cookie.
+            Slack requests additionally carry an <b>HMAC signature</b> that is verified before
+            anything else runs.
+          </div>
+          <div class="node-tags">
+            <span class="tag tag-blue">POST /chat</span>
+            <span class="tag tag-blue">POST /slack/command</span>
+            <span class="tag tag-blue">POST /teams/webhook</span>
+          </div>
+        </div>
+        <div class="connector conn-blue"></div>
+        <div class="spine-dot dot-blue"></div>
+        <div class="flow-spacer"></div>
+      </div>
+
+      <div class="gap"></div>
+
+      <!-- STEP 2 -->
+      <div class="flow-row right">
+        <div class="flow-node accent-yellow">
+          <div class="node-step">Step 2</div>
+          <div class="node-title">Rate Limiter</div>
+          <div class="node-file">File: <span>app.py</span> — _enforce_rate_limit()</div>
+          <div class="node-desc">
+            Before touching anything else, NetCopilot counts how many requests
+            your IP has sent in the last 60 seconds.
+            If you exceed <b>60 requests/minute</b>, it returns HTTP 429 immediately.
+            The counter is capped at 10,000 tracked clients to prevent memory exhaustion.
+          </div>
+          <div class="node-tags">
+            <span class="tag tag-green">Pass → continue</span>
+            <span class="tag tag-red">Fail → HTTP 429</span>
+          </div>
+        </div>
+        <div class="connector conn-yellow"></div>
+        <div class="spine-dot dot-yellow"></div>
+        <div class="flow-spacer"></div>
+      </div>
+
+      <div class="gap"></div>
+
+      <!-- STEP 3 -->
+      <div class="flow-row left">
+        <div class="flow-node accent-green">
+          <div class="node-step">Step 3</div>
+          <div class="node-title">Authentication & Role</div>
+          <div class="node-file">File: <span>app.py</span> — _get_role_from_request()</div>
+          <div class="node-desc">
+            Your session cookie is verified — it's cryptographically signed with <b>SESSION_SECRET</b>.
+            If invalid or expired, HTTP 403 is returned.
+            Your <b>role</b> is extracted from the session: <b>noc</b>, <b>noc-ticket</b>, or <b>admin</b>.
+            This role travels with the request for the rest of its life.
+          </div>
+          <div class="node-tags">
+            <span class="tag tag-green">noc</span>
+            <span class="tag tag-yellow">noc-ticket</span>
+            <span class="tag tag-blue">admin</span>
+            <span class="tag tag-red">invalid → HTTP 403</span>
+          </div>
+        </div>
+        <div class="connector conn-green"></div>
+        <div class="spine-dot dot-green"></div>
+        <div class="flow-spacer"></div>
+      </div>
+
+      <div class="gap"></div>
+
+      <!-- STEP 4 -->
+      <div class="flow-row right">
+        <div class="flow-node accent-purple">
+          <div class="node-step">Step 4</div>
+          <div class="node-title">Build Context for the LLM</div>
+          <div class="node-file">File: <span>app.py</span> — _run_chat()</div>
+          <div class="node-desc">
+            Three things are assembled into a <b>messages array</b> before the LLM is called:<br><br>
+            <b>① Conversation history</b> — last 12 exchanges loaded from <b>memory.db</b> so the LLM remembers what was discussed before.<br><br>
+            <b>② System prompt</b> — built by <b>llm/prompts.py</b>. Tells the LLM who it is, what it can/cannot do, which vendor each device is, and what playbooks exist.<br><br>
+            <b>③ Tool list</b> — assembled by <b>dispatcher.py</b>, filtered by role. A <b>noc</b> user gets 55 diagnostic tools. <b>noc-ticket</b> also gets 4 Jira tools. The LLM cannot call a tool it was never given.
+          </div>
+          <div class="node-tags">
+            <span class="tag tag-purple">memory.db → history</span>
+            <span class="tag tag-purple">prompts.py → instructions</span>
+            <span class="tag tag-purple">dispatcher.py → tool list</span>
+          </div>
+        </div>
+        <div class="connector conn-purple"></div>
+        <div class="spine-dot dot-purple"></div>
+        <div class="flow-spacer"></div>
+      </div>
+
+      <div class="gap"></div>
+
+      <!-- STEP 5 — AGENTIC LOOP (full width) -->
+      <div class="loop-box">
+        <div class="loop-label">Step 5 — The Agentic Loop · app.py _agentic_loop() · max 10 turns</div>
+        <div class="loop-inner">
+          <div class="loop-step">
+            <div class="loop-step-icon">🧠</div>
+            <div class="loop-step-title">LLM called</div>
+            <div class="loop-step-desc">GPT-4o / Claude receives your question + history + tools. Decides what to do next.</div>
+          </div>
+          <div class="loop-arrow">→</div>
+          <div class="loop-step">
+            <div class="loop-step-icon">🔧</div>
+            <div class="loop-step-title">Tool call decided</div>
+            <div class="loop-step-desc">LLM picks a tool and arguments, e.g. <code style="font-size:11px;color:#a78bfa">junos_get_bgp_neighbor_status(device="pe1")</code></div>
+          </div>
+          <div class="loop-arrow">→</div>
+          <div class="loop-step">
+            <div class="loop-step-icon">⚡</div>
+            <div class="loop-step-title">Tool executed</div>
+            <div class="loop-step-desc">Dispatcher routes to right adapter → SSH/NETCONF to device → real output returned</div>
+          </div>
+          <div class="loop-arrow">→</div>
+          <div class="loop-step">
+            <div class="loop-step-icon">📋</div>
+            <div class="loop-step-title">Result appended</div>
+            <div class="loop-step-desc">Device output added to the messages array. LLM is called again with the new context.</div>
+          </div>
+          <div class="loop-arrow">→</div>
+          <div class="loop-step">
+            <div class="loop-step-icon">✅</div>
+            <div class="loop-step-title">Answer ready</div>
+            <div class="loop-step-desc">No more tool calls needed. LLM writes the final plain-English answer.</div>
+          </div>
+        </div>
+        <div class="loop-cap">
+          Multiple tool calls in one turn run <b>in parallel</b> (up to 5 simultaneous device connections) · Hard cap of <b>10 turns</b> per request
+        </div>
+      </div>
+
+      <div class="gap"></div>
+
+      <!-- STEP 6 -->
+      <div class="flow-row left">
+        <div class="flow-node accent-orange">
+          <div class="node-step">Step 6</div>
+          <div class="node-title">Tool Dispatcher routes the call</div>
+          <div class="node-file">File: <span>adapters/devices/dispatcher.py</span></div>
+          <div class="node-desc">
+            The dispatcher reads the tool name prefix to decide where to send it:<br><br>
+            <b>cisco_*</b> → adapters/devices/cisco.py (Netmiko SSH)<br>
+            <b>junos_*</b> → adapters/devices/junos.py (PyEZ NETCONF)<br>
+            <b>nokia_*</b> → adapters/devices/nokia.py (Netmiko SSH)<br>
+            <b>jira_*</b> → adapters/integrations/jira.py (REST API)<br>
+            <b>run_playbook</b> → playbooks/runner.py<br><br>
+            It also checks <b>devices.yaml</b> via registry.py to confirm the device's vendor
+            before connecting.
+          </div>
+          <div class="node-tags">
+            <span class="tag tag-cyan">cisco_* → cisco.py</span>
+            <span class="tag tag-orange">junos_* → junos.py</span>
+            <span class="tag tag-blue">nokia_* → nokia.py</span>
+            <span class="tag tag-purple">jira_* → jira.py</span>
+          </div>
+        </div>
+        <div class="connector conn-orange"></div>
+        <div class="spine-dot dot-orange"></div>
+        <div class="flow-spacer"></div>
+      </div>
+
+      <div class="gap"></div>
+
+      <!-- STEP 7 -->
+      <div class="flow-row right">
+        <div class="flow-node accent-red">
+          <div class="node-step">Step 7</div>
+          <div class="node-title">Circuit Breaker + Credentials</div>
+          <div class="node-file">Files: <span>adapters/devices/pool.py</span> · <span>credentials.py</span></div>
+          <div class="node-desc">
+            Before opening any SSH connection, two checks happen:<br><br>
+            <b>Circuit Breaker (pool.py)</b> — Is this device currently isolated? If it has failed
+            3 times in a row, it's in OPEN state and all calls are blocked for 60 seconds.
+            Returns an error immediately — no SSH attempted.<br><br>
+            <b>Credentials (credentials.py)</b> — Fetches the device username/password.
+            Checks <b>settings.db first</b> (UI-saved credentials), falls back to <b>.env</b>.
+            Passwords are <b>never logged</b> — _scrub_error() strips them from all errors.
+          </div>
+          <div class="node-tags">
+            <span class="tag tag-green">CLOSED → connect</span>
+            <span class="tag tag-red">OPEN → blocked for 60s</span>
+            <span class="tag tag-yellow">HALF-OPEN → one probe</span>
+          </div>
+        </div>
+        <div class="connector conn-red"></div>
+        <div class="spine-dot dot-red"></div>
+        <div class="flow-spacer"></div>
+      </div>
+
+      <div class="gap"></div>
+
+      <!-- STEP 8 -->
+      <div class="flow-row left">
+        <div class="flow-node accent-cyan">
+          <div class="node-step">Step 8</div>
+          <div class="node-title">Device Connection (SSH / NETCONF)</div>
+          <div class="node-file">Files: <span>adapters/devices/cisco.py</span> · <span>junos.py</span> · <span>nokia.py</span></div>
+          <div class="node-desc">
+            The adapter opens a connection and runs the appropriate command:<br><br>
+            <b>Cisco IOS XR</b> → Netmiko SSH → <code style="font-size:11px;color:#22d3ee">show interface Gi0/0/0/0</code><br>
+            <b>Juniper Junos</b> → PyEZ NETCONF → structured XML query<br>
+            <b>Nokia SR OS</b> → Netmiko SSH → <code style="font-size:11px;color:#22d3ee">show port 1/1/1 detail</code><br><br>
+            All commands are <b>read-only show commands</b> — there are no write tools.
+            A <b>60-second hard timeout</b> is applied via asyncio.wait_for — a hung device
+            cannot block the server.
+          </div>
+          <div class="node-tags">
+            <span class="tag tag-green">Read-only — no config push</span>
+            <span class="tag tag-red">60s timeout enforced</span>
+          </div>
+        </div>
+        <div class="connector conn-cyan"></div>
+        <div class="spine-dot dot-cyan"></div>
+        <div class="flow-spacer"></div>
+      </div>
+
+      <div class="gap"></div>
+
+      <!-- STEP 9 -->
+      <div class="flow-row right">
+        <div class="flow-node accent-purple">
+          <div class="node-step">Step 9</div>
+          <div class="node-title">Save to Memory & Return Answer</div>
+          <div class="node-file">File: <span>app.py</span> — _save_memory() → memory.db</div>
+          <div class="node-desc">
+            The LLM's final answer is ready. Before returning it:<br><br>
+            <b>Tool outputs are saved to memory.db</b> — truncated to 800 chars each,
+            prefixed with investigation findings. This means the <i>next</i> time you say
+            "raise a ticket for that", the LLM still has the device data from this conversation.<br><br>
+            The <b>reply is streamed back</b> to your browser/Slack/Teams in real time via SSE
+            (Server-Sent Events) so you see words appearing as the LLM writes them.
+          </div>
+          <div class="node-tags">
+            <span class="tag tag-purple">saved to memory.db</span>
+            <span class="tag tag-green">answer returned to you</span>
+          </div>
+        </div>
+        <div class="connector conn-purple"></div>
+        <div class="spine-dot dot-purple"></div>
+        <div class="flow-spacer"></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══ PARALLEL TOOLS ═══ -->
+  <section id="parallel">
+    <h2>Parallel Tool Execution</h2>
+    <p style="color:var(--dim);font-size:14px;margin-bottom:20px;">When the LLM decides multiple tools are needed in one turn, they all run simultaneously — not one after the other. Up to 5 device calls run in parallel.</p>
+    <div class="parallel-box">
+      <div class="parallel-label">Example — "Investigate the BGP outage on PE1"</div>
+      <div class="parallel-tools">
+        <div class="ptool">
+          <div class="ptool-name">junos_get_bgp_neighbor_status</div>
+          <div class="ptool-desc">Check BGP session state and last error</div>
+        </div>
+        <div class="ptool">
+          <div class="ptool-name">junos_get_interface_health</div>
+          <div class="ptool-desc">Check if the underlay interface is up</div>
+        </div>
+        <div class="ptool">
+          <div class="ptool-name">junos_get_isis_neighbors</div>
+          <div class="ptool-desc">Check IS-IS adjacency to same neighbour</div>
+        </div>
+        <div class="ptool">
+          <div class="ptool-name">syslog_search</div>
+          <div class="ptool-desc">Search logs for BGP events in the last hour</div>
+        </div>
+      </div>
+      <div class="parallel-note">All four run <b>at the same time</b>. Total wait = slowest device, not the sum of all devices.</div>
+    </div>
+  </section>
+
+  <!-- ═══ FILE MAP ═══ -->
+  <section id="files">
+    <h2>File Map — What Each File Does</h2>
+    <div class="filemap">
+      <div class="fcard">
+        <div class="fcard-name">app.py</div>
+        <div class="fcard-desc"><b>The whole server.</b> HTTP endpoints, auth, rate limiter, _run_chat(), _agentic_loop(), memory, metrics, Slack/Teams handlers.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">llm/prompts.py</div>
+        <div class="fcard-desc"><b>The system prompt.</b> Tells the LLM who it is, what it can/cannot do, vendor rules, device inventory, ticket instructions.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">adapters/devices/dispatcher.py</div>
+        <div class="fcard-desc"><b>Air traffic control.</b> Routes every tool call to the right vendor adapter based on the tool name prefix. Enforces role-based tool access.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">adapters/devices/cisco.py</div>
+        <div class="fcard-desc"><b>Cisco IOS XR adapter.</b> 18 tools. SSH via Netmiko. Parses show command output into structured data for the LLM.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">adapters/devices/junos.py</div>
+        <div class="fcard-desc"><b>Juniper Junos adapter.</b> 19 tools. NETCONF via PyEZ. Structured XML queries — more reliable than screen-scraping CLI.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">adapters/devices/nokia.py</div>
+        <div class="fcard-desc"><b>Nokia SR OS adapter.</b> 18 tools. SSH via Netmiko. Parses Nokia-specific show commands.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">adapters/devices/pool.py</div>
+        <div class="fcard-desc"><b>Circuit breaker.</b> Tracks device health per device. Isolates failing devices for 60s after 3 failures. Auto-recovers.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">adapters/devices/registry.py</div>
+        <div class="fcard-desc"><b>Device directory.</b> Reads devices.yaml. Answers "what vendor is pe1?" so the LLM never needs to ask you.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">adapters/integrations/jira.py</div>
+        <div class="fcard-desc"><b>Jira integration.</b> 4 tools: create, update, comment, close tickets. Calls Atlassian REST API via httpx.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">credentials.py</div>
+        <div class="fcard-desc"><b>Credential manager.</b> Fetches passwords: settings.db first, .env as fallback. Strips credentials from all error messages.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">devices.yaml</div>
+        <div class="fcard-desc"><b>Device inventory.</b> Maps device names to IPs, vendor, platform, site. The LLM reads this to know what exists and which vendor to use.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">playbooks/playbooks.yaml</div>
+        <div class="fcard-desc"><b>Diagnostic playbooks.</b> Defines multi-step investigations by intent (link_down, bgp_down, etc.) — which tools to run, what evidence to collect.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">playbooks/runner.py</div>
+        <div class="fcard-desc"><b>Playbook engine.</b> Runs the steps defined in playbooks.yaml, collects evidence, applies severity rules, returns a structured result to the LLM.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">settings.py · settings.db</div>
+        <div class="fcard-desc"><b>Settings store.</b> SQLite database. Credentials and config changed via the UI are written here and take effect immediately — no restart needed.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">memory.db</div>
+        <div class="fcard-desc"><b>Conversation memory.</b> Per-user history (last 12 turns) stored here. Tool outputs are saved so ticket creation later has the investigation context.</div>
+      </div>
+      <div class="fcard">
+        <div class="fcard-name">static/index.html</div>
+        <div class="fcard-desc"><b>The web UI.</b> Single-page chat interface. Connects to /chat/stream for real-time streaming of the LLM response as it's generated.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

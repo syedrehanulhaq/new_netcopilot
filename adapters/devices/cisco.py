@@ -116,16 +116,19 @@ def _ssh(device_name: str):
         _put_cached_ssh(device_name, conn)
     except Exception:
         _evict_ssh(device_name)
-        if not fresh:
-            # Cached connection may have gone stale — retry once with a fresh one
-            raise
         raise
 
 
 def _cli(device: str, command: str) -> str:
-    """Run a CLI command via SSH, return raw output string."""
-    with _ssh(device) as conn:
-        return conn.send_command(command)
+    """Run a CLI command via SSH, retrying once with a fresh connection on failure."""
+    try:
+        with _ssh(device) as conn:
+            return conn.send_command(command)
+    except Exception:
+        # Cache was evicted by _ssh on failure — second call opens a fresh connection
+        logger.debug("SSH retry with fresh connection to %s", device)
+        with _ssh(device) as conn:
+            return conn.send_command(command)
 
 
 _EXECUTOR_TIMEOUT = 60.0  # seconds before an SSH call is considered hung
@@ -214,26 +217,32 @@ def _parse_show_interface(output: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _sync_get_interface_health(device: str, interface: str) -> dict:
-    # Reuse a single SSH session for both commands
-    with _ssh(device) as conn:
-        output = conn.send_command(f"show interface {interface}")
-        parsed = _parse_show_interface(output)
-        parsed["raw_output"] = output
-        try:
-            ctrl = conn.send_command(f"show controllers {interface}")
-            for line in ctrl.splitlines():
-                ll = line.lower()
-                if "rx power" in ll:
-                    m = re.search(r"([-\d.]+)\s*dBm", line, re.IGNORECASE)
-                    if m:
-                        parsed["rx_power_dbm"] = float(m.group(1))
-                if "tx power" in ll:
-                    m = re.search(r"([-\d.]+)\s*dBm", line, re.IGNORECASE)
-                    if m:
-                        parsed["tx_power_dbm"] = float(m.group(1))
-        except Exception:
-            pass
-    return {"device": device, "interface": interface, **parsed}
+    def _do() -> dict:
+        with _ssh(device) as conn:
+            output = conn.send_command(f"show interface {interface}")
+            parsed = _parse_show_interface(output)
+            parsed["raw_output"] = output
+            try:
+                ctrl = conn.send_command(f"show controllers {interface}")
+                for line in ctrl.splitlines():
+                    ll = line.lower()
+                    if "rx power" in ll:
+                        m = re.search(r"([-\d.]+)\s*dBm", line, re.IGNORECASE)
+                        if m:
+                            parsed["rx_power_dbm"] = float(m.group(1))
+                    if "tx power" in ll:
+                        m = re.search(r"([-\d.]+)\s*dBm", line, re.IGNORECASE)
+                        if m:
+                            parsed["tx_power_dbm"] = float(m.group(1))
+            except Exception:
+                pass
+        return {"device": device, "interface": interface, **parsed}
+
+    try:
+        return _do()
+    except Exception:
+        logger.debug("SSH retry for get_interface_health on %s %s", device, interface)
+        return _do()
 
 
 def _sync_get_interface_status(device: str) -> dict:

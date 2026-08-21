@@ -102,6 +102,14 @@ class DevicePool:
         state.failure_count = 0
         state.last_failure_reason = ""
 
+    def force_probe(self, device: str) -> None:
+        """Force circuit to HALF_OPEN so the next call gets a fresh attempt.
+        Call this before alert investigations to bypass a stale OPEN state."""
+        state = self._devices.get(device)
+        if state and state.circuit == CircuitState.OPEN:
+            state.circuit = CircuitState.HALF_OPEN
+            logger.info("Circuit force-probed for '%s' — allowing one attempt", device)
+
     def record_failure(self, device: str, reason: str = "") -> None:
         state = self._devices.get(device)
         if not state:

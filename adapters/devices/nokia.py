@@ -115,9 +115,14 @@ def _ssh(device_name: str):
 
 
 def _cli(device: str, command: str) -> str:
-    """Run CLI command via SSH, return raw output string."""
-    with _ssh(device) as conn:
-        return conn.send_command(command)
+    """Run CLI command via SSH, retrying once with a fresh connection on failure."""
+    try:
+        with _ssh(device) as conn:
+            return conn.send_command(command)
+    except Exception:
+        logger.debug("SSH retry with fresh connection to %s", device)
+        with _ssh(device) as conn:
+            return conn.send_command(command)
 
 
 def _run_cli(device: str, command: str) -> dict[str, Any]:

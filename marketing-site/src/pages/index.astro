@@ -1,0 +1,477 @@
+---
+const title = "NetCopilot";
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} | AI Network Operations Copilot</title>
+    <meta
+      name="description"
+      content="NetCopilot is an AI-powered network operations copilot that turns natural language into evidence-backed diagnostics across multi-vendor networks."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Sora:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #f6f9ff;
+        --ink: #0c1426;
+        --muted: #5b6678;
+        --brand-blue: #1a8ef2;
+        --brand-cyan: #21c1f5;
+        --brand-violet: #6b2bd9;
+        --card: #ffffff;
+        --stroke: rgba(12, 20, 38, 0.08);
+        --shadow: 0 30px 60px rgba(22, 50, 120, 0.15);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Manrope", sans-serif;
+        color: var(--ink);
+        background: radial-gradient(circle at 15% 15%, rgba(33, 193, 245, 0.22), transparent 45%),
+          radial-gradient(circle at 85% 15%, rgba(107, 43, 217, 0.18), transparent 40%),
+          linear-gradient(180deg, #f9fbff, var(--bg));
+        min-height: 100vh;
+      }
+
+      .container {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 48px 24px 80px;
+      }
+
+      header {
+        display: grid;
+        gap: 24px;
+        align-items: center;
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .logo-lockup {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+
+      .logo {
+        width: 128px;
+        height: 128px;
+        border-radius: 26px;
+        background: #fff;
+        box-shadow: 0 18px 40px rgba(26, 142, 242, 0.25);
+        object-fit: cover;
+        image-rendering: -webkit-optimize-contrast;
+      }
+
+      .nav-links {
+        display: flex;
+        gap: 18px;
+        font-size: 14px;
+        color: var(--muted);
+      }
+
+      .nav-links a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 36px;
+        align-items: center;
+        margin-top: 32px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 8px 14px;
+        background: rgba(26, 142, 242, 0.12);
+        color: #0c3b7a;
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        font-family: "Sora", sans-serif;
+        font-size: clamp(32px, 4vw, 54px);
+        margin: 16px 0 12px;
+      }
+
+      .hero p {
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.7;
+      }
+
+      .cta {
+        display: flex;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .btn {
+        padding: 12px 20px;
+        border-radius: 12px;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 14px;
+      }
+
+      .btn.primary {
+        background: linear-gradient(120deg, var(--brand-blue), var(--brand-violet));
+        color: #fff;
+        box-shadow: 0 16px 30px rgba(26, 142, 242, 0.25);
+      }
+
+      .btn.secondary {
+        background: #eef4ff;
+        color: var(--ink);
+        border: 1px solid rgba(26, 142, 242, 0.2);
+      }
+
+      .hero-card {
+        background: var(--card);
+        border-radius: 24px;
+        padding: 28px;
+        box-shadow: var(--shadow);
+        border: 1px solid var(--stroke);
+      }
+
+      .hero-card h3 {
+        font-family: "Sora", sans-serif;
+        font-size: 18px;
+        margin: 0 0 12px;
+      }
+
+      .hero-card ul {
+        padding: 0;
+        list-style: none;
+        margin: 0;
+        display: grid;
+        gap: 12px;
+      }
+
+      .hero-card li {
+        display: flex;
+        gap: 10px;
+        font-size: 14px;
+        color: var(--muted);
+      }
+
+      section {
+        margin-top: 64px;
+      }
+
+      .section-title {
+        font-family: "Sora", sans-serif;
+        font-size: 24px;
+        margin: 0 0 18px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 18px;
+      }
+
+      .grid.three {
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      .card {
+        background: var(--card);
+        border-radius: 18px;
+        padding: 20px;
+        border: 1px solid var(--stroke);
+        box-shadow: 0 16px 32px rgba(22, 50, 120, 0.1);
+      }
+
+      .card strong {
+        font-size: 15px;
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .feature-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .feature-list span {
+        display: block;
+        font-size: 14px;
+        color: var(--muted);
+      }
+
+      .cta-panel {
+        background: linear-gradient(135deg, rgba(26, 142, 242, 0.12), rgba(107, 43, 217, 0.12));
+        border-radius: 24px;
+        padding: 28px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .cta-panel input {
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(26, 142, 242, 0.2);
+        font-family: inherit;
+      }
+
+      .contact-grid {
+        display: grid;
+        gap: 18px;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      }
+
+      .contact-card {
+        background: var(--card);
+        border-radius: 18px;
+        padding: 22px;
+        border: 1px solid var(--stroke);
+        box-shadow: 0 16px 32px rgba(22, 50, 120, 0.1);
+      }
+
+      .contact-card a {
+        color: var(--brand-blue);
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .contact-form {
+        display: grid;
+        gap: 12px;
+      }
+
+      .contact-form input,
+      .contact-form textarea {
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(26, 142, 242, 0.2);
+        font-family: inherit;
+        font-size: 14px;
+      }
+
+      .contact-form textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+
+      footer {
+        margin-top: 64px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 900px) {
+        .hero {
+          grid-template-columns: 1fr;
+        }
+        .nav {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="nav">
+          <div class="logo-lockup">
+            <img class="logo" src="/netcopilot-logo.png" alt="NetCopilot logo" />
+            <div>
+              <div class="pill">AI Network Operations</div>
+              <h1>NetCopilot</h1>
+            </div>
+          </div>
+          <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#integrations">Integrations</a>
+            <a href="#security">Security</a>
+            <a href="#deploy">Deploy</a>
+            <a href="#contact">Contact</a>
+          </div>
+        </div>
+
+        <div class="hero">
+          <div>
+            <h1>AI‑powered, evidence‑first troubleshooting for multi‑vendor networks.</h1>
+            <p>
+              NetCopilot turns plain‑English questions into verified diagnostics by calling live device tools and
+              operational systems. Reduce MTTR, eliminate guesswork, and standardize triage across teams.
+            </p>
+            <div class="cta">
+              <button class="btn primary">Request Demo</button>
+              <button class="btn secondary">Download One‑Pager</button>
+            </div>
+          </div>
+          <div class="hero-card">
+            <h3>What it does</h3>
+            <ul>
+              <li>• Calls real CLI tools and returns evidence</li>
+              <li>• Vendor‑aware: Cisco, Juniper, Nokia</li>
+              <li>• Integrates with Jira, Slack, Prometheus</li>
+              <li>• Read‑only by design, audit‑ready</li>
+            </ul>
+          </div>
+        </div>
+      </header>
+
+      <section id="features">
+        <h2 class="section-title">Core Capabilities</h2>
+        <div class="grid three">
+          <div class="card">
+            <strong>Natural‑language diagnostics</strong>
+            <p>Ask plain questions and get structured answers with evidence from real devices.</p>
+          </div>
+          <div class="card">
+            <strong>End‑to‑end link validation</strong>
+            <p>LLDP‑aware checks verify both local and remote sides before concluding root cause.</p>
+          </div>
+          <div class="card">
+            <strong>Operational playbooks</strong>
+            <p>Flaps, BGP/ISIS down, CRC spikes, high CPU — guided and consistent.</p>
+          </div>
+          <div class="card">
+            <strong>Ticketing + ChatOps</strong>
+            <p>Create or update tickets with structured diagnostics and share in Slack.</p>
+          </div>
+          <div class="card">
+            <strong>Flexible LLM backend</strong>
+            <p>OpenAI, Bedrock, or local models via LiteLLM without code changes.</p>
+          </div>
+          <div class="card">
+            <strong>Admin controls</strong>
+            <p>Role‑gated actions, audit logging, and safe tool execution.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="integrations">
+        <h2 class="section-title">Adapters & Integrations</h2>
+        <div class="grid three">
+          <div class="card">
+            <strong>Device adapters</strong>
+            <p>Cisco IOS XR, Juniper Junos, Nokia SR OS with CLI parsing and health checks.</p>
+          </div>
+          <div class="card">
+            <strong>Ticketing</strong>
+            <p>Jira today; ServiceNow adapter ready for expansion.</p>
+          </div>
+          <div class="card">
+            <strong>Monitoring</strong>
+            <p>Prometheus metrics for real flaps and alert correlation.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="security">
+        <h2 class="section-title">Security & Compliance</h2>
+        <div class="grid three">
+          <div class="card">
+            <strong>Read‑only by default</strong>
+            <p>No configuration changes; change requests are ticket‑driven.</p>
+          </div>
+          <div class="card">
+            <strong>Audit‑ready</strong>
+            <p>JSON logs with user attribution for every tool call.</p>
+          </div>
+          <div class="card">
+            <strong>Deploy in your tenant</strong>
+            <p>Run in customer VPC/AWS with IAM and private endpoints.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="deploy">
+        <h2 class="section-title">Deployment Options</h2>
+        <div class="grid three">
+          <div class="card">
+            <strong>Kubernetes (Helm)</strong>
+            <p>Production‑ready manifests + Helm chart for easy install.</p>
+          </div>
+          <div class="card">
+            <strong>On‑prem appliance</strong>
+            <p>Docker or VM with local LLM for strict data control.</p>
+          </div>
+          <div class="card">
+            <strong>Cloud‑native</strong>
+            <p>Use Bedrock or OpenAI with secure routing and policy controls.</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="cta-panel">
+          <h2 class="section-title">Ready to see it in action?</h2>
+          <p>We’ll run a live demo using your environment or a sandbox lab.</p>
+          <div class="cta">
+            <input type="email" placeholder="work@email.com" />
+            <button class="btn primary">Book a demo</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="contact">
+        <h2 class="section-title">Contact</h2>
+        <div class="contact-grid">
+          <div class="contact-card">
+            <strong>Talk to the team</strong>
+            <p>Share your use case and we will tailor a pilot plan.</p>
+            <p><a href="mailto:hello@netcopilot.ai">hello@netcopilot.ai</a></p>
+          </div>
+          <div class="contact-card">
+            <strong>Commercial & Partnerships</strong>
+            <p>Request pricing, deployment options, and security details.</p>
+            <p><a href="mailto:sales@netcopilot.ai">sales@netcopilot.ai</a></p>
+          </div>
+          <div class="contact-card">
+            <strong>Send a message</strong>
+            <form class="contact-form">
+              <input type="text" placeholder="Name" />
+              <input type="email" placeholder="Work email" />
+              <input type="text" placeholder="Company" />
+              <textarea placeholder="How can we help?" ></textarea>
+              <button class="btn primary" type="button">Send message</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        © 2026 NetCopilot. AI Network Operations Tool.
+      </footer>
+    </div>
+  </body>
+</html>

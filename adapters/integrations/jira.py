@@ -326,7 +326,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "ticket_type": {"type": "string", "description": "Issue type, e.g. 'Task', 'Bug', 'Incident'."},
-                    "summary": {"type": "string", "description": "One-line ticket title."},
+                    "summary": {"type": "string", "description": "One-line ticket title. YOU must generate this — never ask the user, never leave blank, never copy their words. Use the investigation findings. Format: '<issue> on <device> [— <key detail>]'. Examples: 'Interface Gi0/0/0/0 administratively down on sandbox-iosxr-1', 'BGP session down on pe1 toward 10.0.0.2 — Hold Timer Expired'."},
                     "description": {"type": "string", "description": "Detailed ticket body. ALWAYS include: device name, issue summary, severity (Critical/Major/Minor), investigation findings from tool output, playbook evidence (state, last_error, flaps, etc.), and recommended next steps. Do not leave this as a one-liner."},
                     "team": {"type": "string", "description": "Team label to apply."},
                     "priority": {"type": "string", "description": "Priority: High, Medium, Low."},
