@@ -3,7 +3,15 @@ import sqlite3
 from typing import Any, Dict
 
 
-_SETTINGS_DB = "settings.db"
+def data_path(filename: str) -> str:
+    """Location of a runtime data file (SQLite DBs). NETCOPILOT_DATA_DIR puts them on a volume."""
+    data_dir = os.environ.get("NETCOPILOT_DATA_DIR", "")
+    if data_dir:
+        os.makedirs(data_dir, exist_ok=True)
+    return os.path.join(data_dir, filename)
+
+
+_SETTINGS_DB = data_path("settings.db")
 
 
 def _init_settings_db() -> None:

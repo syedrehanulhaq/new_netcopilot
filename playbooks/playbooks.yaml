@@ -1,20 +1,37 @@
+# Built-in diagnostic playbooks.
+#
+# Rule syntax (see playbooks/runner.py):
+#   field=value / != / > / < / >= / <=     compare a field in a tool result record
+#   cond1 & cond2                          both must hold on the SAME record
+#   "tool_name: cond"                      only look at that tool's results
+# Evidence fields accept the same "tool_name: field" scoping.
+#
+# Steps whose inputs are missing (e.g. no interface given) or whose tool is not
+# implemented for the device's vendor are skipped, not reported as errors.
+# Edits here are re-seeded into playbooks.db automatically on next load.
+
 - name: Interface down/down
   intent: link_down
   tools:
     - get_interface_health
-    - get_link_health
+    - get_lldp_neighbor
   evidence_fields:
     - admin_status
     - oper_status
     - last_flapped
+    - last_link_flapped
     - active_alarms
     - active_defects
     - input_errors
     - output_errors
+    - carrier_transitions
+    - neighbor_device
+    - neighbor_interface
   severity_rules:
     critical:
-      - oper_status=down
-      - admin_status=up
+      - "get_interface_health: admin_status=up & oper_status=down"
+    warning:
+      - "get_interface_health: admin_status=down"
   vendor_hints:
     junos: "show interfaces <if> extensive"
     iosxr: "show interface <if>"
@@ -23,11 +40,12 @@
 - name: Interface flapping
   intent: link_flap
   tools:
-    - get_top_flapping_links
     - get_interface_health
     - get_interface_counters
+    - get_top_flapping_links
   evidence_fields:
     - last_flapped
+    - last_link_flapped
     - carrier_transitions
     - crc_errors
     - input_errors
@@ -55,47 +73,59 @@
 - name: BGP neighbor down
   intent: bgp_down
   tools:
-    - get_bgp_summary
     - get_bgp_neighbor_status
+    - get_bgp_summary
     - get_ping
   evidence_fields:
-    - state
+    - "get_bgp_neighbor_status: state"
+    - last_state
     - last_error
     - last_event
-    - flaps
+    - last_reset
+    - flap_count
+    - received_prefixes
+    - accepted_prefixes
+    - packet_loss_pct
   severity_rules:
     critical:
-      - state=Idle
-      - state=Active
+      - "get_bgp_neighbor_status: state!=Established"
 
 - name: BGP neighbor Active/Idle
   intent: bgp_active
   tools:
-    - get_bgp_summary
     - get_bgp_neighbor_status
+    - get_bgp_summary
     - get_route_lookup
     - get_ping
   evidence_fields:
-    - state
+    - "get_bgp_neighbor_status: state"
     - last_error
     - last_event
-    - flaps
+    - flap_count
+    - "get_route_lookup: found"
+    - packet_loss_pct
+  severity_rules:
+    critical:
+      - "get_bgp_neighbor_status: state!=Established"
 
 - name: ISIS adjacency down
   intent: isis_down
   tools:
-    - get_isis_health
     - get_isis_neighbors
+    - get_isis_interface
     - get_mtu_info
   evidence_fields:
-    - state
+    - "get_isis_neighbors: state"
     - hold
+    - level
     - mtu
-    - isis_log
   severity_rules:
     critical:
-      - state=Down
-      - state=Init
+      - "get_isis_neighbors: state=Down"
+      - "get_isis_neighbors: state=Initializing"
+      - "get_isis_neighbors: state=Init"
+    warning:
+      - "get_isis_neighbors: total>0 & up=0"
 
 - name: Routing missing
   intent: route_missing
@@ -105,8 +135,12 @@
     - get_isis_neighbors
     - get_ospf_neighbors
   evidence_fields:
+    - "get_route_lookup: found"
     - routes
     - has_default_route
+  severity_rules:
+    warning:
+      - "get_route_lookup: found=false"
 
 - name: High CPU / memory
   intent: cpu_high
@@ -114,22 +148,24 @@
     - get_cpu_memory
   evidence_fields:
     - cpu_percent
-    - memory_percent
+    - memory_used_percent
   severity_rules:
     warning:
       - cpu_percent>80
-      - memory_percent>80
+      - memory_used_percent>80
 
 - name: Chassis/PIC/FPC issue
   intent: hardware_fault
   tools:
     - get_chassis_health
   evidence_fields:
-    - fpcs
-    - pics
+    - has_alarms
     - chassis_alarms
-    - system_alarms
+    - fpcs
+    - routing_engine
   severity_rules:
     critical:
-      - chassis_alarms=active
-      - system_alarms=active
+      - "get_chassis_health: class=Major"
+    warning:
+      - "get_chassis_health: class=Minor"
+      - "get_chassis_health: state=Offline"

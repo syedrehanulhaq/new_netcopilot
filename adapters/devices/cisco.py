@@ -15,108 +15,48 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import threading
-import time
-from contextlib import contextmanager
 from typing import Any, Callable
 
 from credentials import get_secret
 from adapters.devices.registry import resolve_host
-from adapters.devices.pool import get_pool, CircuitOpenError, DevicePool
+from adapters.devices.pool import get_pool, CircuitOpenError
+from adapters.devices.safety import UnsafeInputError, reject_control_chars, validate_cli_command
+from adapters.devices.ssh_cache import SSHSessionCache
 
 logger = logging.getLogger("netcopilot.adapters.cisco")
 
 # ---------------------------------------------------------------------------
-# SSH connection cache — reuse sessions instead of reconnecting each tool call
+# SSH sessions — reused across tool calls, each checked out exclusively
 # ---------------------------------------------------------------------------
 
-_SSH_TTL = 90.0          # seconds to keep an idle connection alive
-_SSH_MAX_CACHED = 20     # max cached connections across all devices
-
-_conn_cache: dict[str, tuple[Any, float]] = {}  # device → (conn, last_used)
-_conn_lock = threading.Lock()
+_SESSIONS = SSHSessionCache("cisco")
 
 
-def _get_cached_ssh(device_name: str):
-    """Return a live cached Netmiko connection, or None if not available."""
-    with _conn_lock:
-        entry = _conn_cache.get(device_name)
-        if entry is None:
-            return None
-        conn, last_used = entry
-        if time.monotonic() - last_used > _SSH_TTL:
-            _conn_cache.pop(device_name, None)
-            try:
-                conn.disconnect()
-            except Exception:
-                pass
-            return None
-        _conn_cache[device_name] = (conn, time.monotonic())
-        return conn
-
-
-def _put_cached_ssh(device_name: str, conn) -> None:
-    with _conn_lock:
-        if len(_conn_cache) >= _SSH_MAX_CACHED and device_name not in _conn_cache:
-            # Evict the oldest entry
-            oldest = min(_conn_cache, key=lambda k: _conn_cache[k][1])
-            old_conn, _ = _conn_cache.pop(oldest)
-            try:
-                old_conn.disconnect()
-            except Exception:
-                pass
-        _conn_cache[device_name] = (conn, time.monotonic())
-
-
-def _evict_ssh(device_name: str) -> None:
-    with _conn_lock:
-        entry = _conn_cache.pop(device_name, None)
-    if entry:
-        try:
-            entry[0].disconnect()
-        except Exception:
-            pass
-
-
-@contextmanager
-def _ssh(device_name: str):
-    """
-    Yield a Netmiko SSH session, reusing a cached connection when available.
-    On exception the connection is evicted so the next call reconnects fresh.
-    """
+def _connect(device_name: str):
     from netmiko import ConnectHandler
 
-    conn = _get_cached_ssh(device_name)
-    fresh = conn is None
+    host, port = resolve_host(device_name)
+    user = get_secret("CISCO_USER", "")
+    passwd = get_secret("CISCO_PASS", "")
+    if not user or not passwd:
+        raise RuntimeError("CISCO_USER or CISCO_PASS not configured.")
 
-    if fresh:
-        host, port = resolve_host(device_name)
-        user = get_secret("CISCO_USER", "")
-        passwd = get_secret("CISCO_PASS", "")
-        if not user or not passwd:
-            raise RuntimeError("CISCO_USER or CISCO_PASS not configured.")
+    params: dict[str, Any] = {
+        "device_type": "cisco_xr",
+        "host": host,
+        "username": user,
+        "password": passwd,
+        "fast_cli": True,
+        "conn_timeout": int(get_secret("NETCONF_TIMEOUT", "30")),
+    }
+    if port:
+        params["port"] = port
+    return ConnectHandler(**params)
 
-        params: dict[str, Any] = {
-            "device_type": "cisco_xr",
-            "host": host,
-            "username": user,
-            "password": passwd,
-            "fast_cli": True,
-            "conn_timeout": int(get_secret("NETCONF_TIMEOUT", "30")),
-        }
-        if port:
-            params["port"] = port
-        conn = ConnectHandler(**params)
-        logger.debug("SSH new connection to %s", device_name)
-    else:
-        logger.debug("SSH reusing cached connection to %s", device_name)
 
-    try:
-        yield conn
-        _put_cached_ssh(device_name, conn)
-    except Exception:
-        _evict_ssh(device_name)
-        raise
+def _ssh(device_name: str, fresh: bool = False):
+    """Yield an exclusive Netmiko session; it is dropped if the block raises."""
+    return _SESSIONS.session(device_name, lambda: _connect(device_name), fresh=fresh)
 
 
 def _cli(device: str, command: str) -> str:
@@ -125,9 +65,8 @@ def _cli(device: str, command: str) -> str:
         with _ssh(device) as conn:
             return conn.send_command(command)
     except Exception:
-        # Cache was evicted by _ssh on failure — second call opens a fresh connection
         logger.debug("SSH retry with fresh connection to %s", device)
-        with _ssh(device) as conn:
+        with _ssh(device, fresh=True) as conn:
             return conn.send_command(command)
 
 
@@ -147,6 +86,10 @@ def _err(device: str, exc: Exception, **extra) -> dict:
 
 async def _run_tool(device: str, fn, *fn_args, **err_extra) -> dict:
     """Run sync fn(*fn_args) in executor with circuit breaker, timeout, and error scrubbing."""
+    try:
+        reject_control_chars(device, *fn_args)
+    except UnsafeInputError as exc:
+        return {"error": f"Rejected unsafe input: {exc}", "device": device, **err_extra}
     _pool = get_pool()
     try:
         async with _pool.acquire(device):
@@ -217,8 +160,8 @@ def _parse_show_interface(output: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _sync_get_interface_health(device: str, interface: str) -> dict:
-    def _do() -> dict:
-        with _ssh(device) as conn:
+    def _do(fresh: bool = False) -> dict:
+        with _ssh(device, fresh=fresh) as conn:
             output = conn.send_command(f"show interface {interface}")
             parsed = _parse_show_interface(output)
             parsed["raw_output"] = output
@@ -242,7 +185,7 @@ def _sync_get_interface_health(device: str, interface: str) -> dict:
         return _do()
     except Exception:
         logger.debug("SSH retry for get_interface_health on %s %s", device, interface)
-        return _do()
+        return _do(fresh=True)
 
 
 def _sync_get_interface_status(device: str) -> dict:
@@ -448,6 +391,12 @@ def _sync_get_cpu_memory(device: str) -> dict:
             result["mem_free_mb"] = (total_kb - used_kb) // 1024
             result["mem_used_percent"] = round(used_kb / total_kb * 100, 1) if total_kb else None
 
+    # Vendor-neutral fields used by the cpu_high playbook (same names as Junos)
+    if "cpu_1m_percent" in result:
+        result["cpu_percent"] = result["cpu_1m_percent"]
+    if result.get("mem_used_percent") is not None:
+        result["memory_used_percent"] = result["mem_used_percent"]
+
     return result
 
 
@@ -510,26 +459,6 @@ def _sync_run_command(device: str, command: str) -> dict:
 # ---------------------------------------------------------------------------
 # Async public API — each wraps a sync impl inside the circuit breaker
 # ---------------------------------------------------------------------------
-
-def _make_async(sync_fn, *extra_keys):
-    """Factory that returns an async wrapper for a sync tool function."""
-    async def wrapper(**kwargs) -> dict:
-        device = kwargs.get("device", "")
-        _pool = get_pool()
-        try:
-            async with _pool.acquire(device):
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, lambda: sync_fn(**kwargs))
-                _pool.record_success(device)
-                return result
-        except CircuitOpenError as exc:
-            return {"error": str(exc), "device": device}
-        except Exception as exc:
-            _pool.record_failure(device, str(exc))
-            return _err(device, exc)
-    wrapper.__name__ = sync_fn.__name__.lstrip("_sync")
-    return wrapper
-
 
 async def get_interface_health(device: str, interface: str) -> dict:
     """Get interface admin/oper status, errors, counters, and last flap."""
@@ -617,7 +546,11 @@ async def get_chassis_health(device: str) -> dict:
 
 
 async def run_command(device: str, command: str) -> dict:
-    """Run an arbitrary show/diagnostic CLI command on the device."""
+    """Run a read-only show/ping/traceroute CLI command on the device."""
+    try:
+        command = validate_cli_command("cisco", command)
+    except UnsafeInputError as exc:
+        return {"device": device, "command": command, "error": f"Command rejected: {exc}"}
     return await _run_tool(device, _sync_run_command, device, command, command=command)
 
 

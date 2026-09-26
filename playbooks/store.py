@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import sqlite3
@@ -6,8 +7,10 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from settings import data_path
 
-PLAYBOOK_DB = "playbooks.db"
+
+PLAYBOOK_DB = data_path("playbooks.db")
 PLAYBOOK_YAML = os.path.join(os.path.dirname(__file__), "playbooks.yaml")
 
 
@@ -28,6 +31,7 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute("CREATE TABLE IF NOT EXISTS playbook_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
 
 
 def _slugify(value: str) -> str:
@@ -40,15 +44,16 @@ def _infer_inputs(tools: List[str]) -> List[str]:
     inputs: List[str] = []
     tool_inputs = {
         "get_interface_health": ["device", "interface"],
-        "get_link_health": ["device", "interface"],
         "get_interface_counters": ["device", "interface"],
         "get_interface_status": ["device"],
-        "get_top_flapping_links": ["limit", "since_hours"],
+        "get_lldp_neighbor": ["device", "interface"],
+        "get_top_flapping_links": [],
         "get_bgp_neighbor_status": ["device", "neighbor"],
         "get_bgp_summary": ["device"],
         "get_ospf_neighbors": ["device"],
         "get_isis_neighbors": ["device"],
-        "get_isis_health": ["device", "interface"],
+        "get_isis_interface": ["device", "interface"],
+        "get_optics": ["device", "interface"],
         "get_route_lookup": ["device", "prefix"],
         "get_bgp_route": ["device", "prefix"],
         "get_acl_hits": ["device", "acl_name"],
@@ -66,14 +71,23 @@ def _infer_inputs(tools: List[str]) -> List[str]:
 
 
 def _seed_from_yaml() -> None:
+    """Seed built-in playbooks from playbooks.yaml.
+
+    Runs when the DB is empty or playbooks.yaml has changed since the last
+    seed, so fixes to built-in playbooks reach existing installs. Playbooks
+    created in the Admin UI (ids not in the YAML) are left untouched.
+    """
     if not os.path.exists(PLAYBOOK_YAML):
         return
+    with open(PLAYBOOK_YAML, "rb") as handle:
+        content = handle.read()
+    digest = hashlib.sha256(content).hexdigest()
     with sqlite3.connect(PLAYBOOK_DB) as conn:
+        row = conn.execute("SELECT value FROM playbook_meta WHERE key = 'yaml_sha256'").fetchone()
         existing = conn.execute("SELECT COUNT(1) FROM playbooks").fetchone()
-        if existing and existing[0] > 0:
-            return
-    with open(PLAYBOOK_YAML, "r", encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle) or []
+    if row and row[0] == digest and existing and existing[0] > 0:
+        return
+    raw = yaml.safe_load(content) or []
     playbooks: List[Dict[str, Any]] = []
     for item in raw:
         tools = item.get("tools") or []
@@ -95,6 +109,11 @@ def _seed_from_yaml() -> None:
             }
         )
     upsert_playbooks(playbooks)
+    with sqlite3.connect(PLAYBOOK_DB) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO playbook_meta (key, value) VALUES ('yaml_sha256', ?)",
+            (digest,),
+        )
 
 
 def list_playbooks() -> List[Dict[str, Any]]:

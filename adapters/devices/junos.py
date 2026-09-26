@@ -21,7 +21,8 @@ from typing import Any, Callable, Optional
 
 from credentials import get_secret
 from adapters.devices.registry import resolve_host
-from adapters.devices.pool import get_pool, CircuitOpenError, DevicePool
+from adapters.devices.pool import get_pool, CircuitOpenError
+from adapters.devices.safety import UnsafeInputError, validate_cli_command
 
 logger = logging.getLogger("netcopilot.adapters.junos")
 
@@ -401,9 +402,11 @@ def _sync_get_cpu_memory(device: str) -> dict:
         if re is None:
             return {"device": device, "error": "Route engine info not found"}
 
-        cpu_idle = _int(_find(re, "cpu-idle"))
+        cpu_idle_str = _find(re, "cpu-idle")
+        cpu_idle = _int(cpu_idle_str)
         mem_util_str = _find(re, "memory-system-total-used-percent")
-        cpu_percent = 100 - cpu_idle if cpu_idle else None
+        # cpu-idle of 0 means 100% busy — only a missing value is unknown
+        cpu_percent = 100 - cpu_idle if cpu_idle_str else None
         mem_percent = _int(mem_util_str) if mem_util_str else None
 
         return {
@@ -758,7 +761,11 @@ async def get_optics(device: str, interface: str, pool=None) -> dict:
 
 
 async def run_command(device: str, command: str, pool=None) -> dict:
-    """Run an arbitrary show/diagnostic CLI command on a Junos device."""
+    """Run a read-only show/ping/traceroute CLI command on a Junos device."""
+    try:
+        command = validate_cli_command("junos", command)
+    except UnsafeInputError as exc:
+        return {"device": device, "command": command, "error": f"Command rejected: {exc}"}
     return await _run_tool(device, lambda: _sync_run_command(device, command), pool=pool)
 
 

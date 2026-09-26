@@ -5,7 +5,6 @@ Device credentials (CISCO_USER/PASS, JUNIPER_USER/PASS, NOKIA_USER/PASS,
 NETCONF_PORT, NETCONF_TIMEOUT) are consumed directly by each MCP server
 from the environment — they are NOT needed here.
 """
-import os
 from typing import Dict
 
 from dotenv import load_dotenv
@@ -84,49 +83,62 @@ SESSION_SECRET = get_setting("SESSION_SECRET", "change-me")
 
 
 def _inventory_params() -> dict[str, str | bool]:
+    # Read at call time so Admin UI changes apply on "Reload Inventory".
     return {
-        "registry_path": get_setting(
-            "DEVICE_REGISTRY_PATH",
-            os.path.join(os.path.dirname(__file__), "devices.yaml"),
-        ),
-        "netbox_url": NETBOX_URL,
-        "netbox_token": NETBOX_TOKEN,
-        "netbox_verify_ssl": NETBOX_VERIFY_SSL,
-        "netbox_filter": NETBOX_FILTER,
-        "nautobot_url": NAUTOBOT_URL,
-        "nautobot_token": NAUTOBOT_TOKEN,
-        "nautobot_verify_ssl": NAUTOBOT_VERIFY_SSL,
-        "nautobot_filter": NAUTOBOT_FILTER,
+        "registry_path": "",  # devices.yaml is loaded by the device registry itself
+        "netbox_url": get_setting("NETBOX_URL", ""),
+        "netbox_token": get_setting("NETBOX_TOKEN", ""),
+        "netbox_verify_ssl": get_setting_bool("NETBOX_VERIFY_SSL", True),
+        "netbox_filter": get_setting("NETBOX_FILTER", ""),
+        "nautobot_url": get_setting("NAUTOBOT_URL", ""),
+        "nautobot_token": get_setting("NAUTOBOT_TOKEN", ""),
+        "nautobot_verify_ssl": get_setting_bool("NAUTOBOT_VERIFY_SSL", True),
+        "nautobot_filter": get_setting("NAUTOBOT_FILTER", ""),
     }
+
+
+# adapter vendor → (NetBox manufacturer setting, Nautobot manufacturer setting, default)
+_INVENTORY_VENDORS: dict[str, tuple[str, str, str]] = {
+    "cisco": ("NETBOX_MANUFACTURER_CISCO", "NAUTOBOT_MANUFACTURER_CISCO", "Cisco"),
+    "junos": ("NETBOX_MANUFACTURER_JUNIPER", "NAUTOBOT_MANUFACTURER_JUNIPER", "Juniper"),
+    "nokia": ("NETBOX_MANUFACTURER_NOKIA", "NAUTOBOT_MANUFACTURER_NOKIA", "Nokia"),
+    "aruba": ("NETBOX_MANUFACTURER_ARUBA", "NAUTOBOT_MANUFACTURER_ARUBA", "Aruba"),
+}
 
 
 def reload_inventory_devices() -> dict[str, int]:
-    """Reload device inventory from YAML / NetBox / Nautobot.
+    """Reload the device registry from devices.yaml plus NetBox / Nautobot.
 
-    Returns a count dict for logging; the loaded data is available via
-    devices.yaml (read by each MCP server) rather than in-memory dicts.
+    Devices found in NetBox/Nautobot become routable tool targets; entries in
+    devices.yaml override them on name collisions. Returns per-vendor counts
+    of the resulting registry.
     """
+    from adapters.devices.registry import list_devices, reload_registry, set_external_devices
+
     params = _inventory_params()
-    cisco = load_inventory_devices(
-        manufacturer_netbox=NETBOX_MANUFACTURER_CISCO,
-        manufacturer_nautobot=NAUTOBOT_MANUFACTURER_CISCO,
-        registry_key="cisco_devices",
-        **params,
-    )
-    juniper = load_inventory_devices(
-        manufacturer_netbox=NETBOX_MANUFACTURER_JUNIPER,
-        manufacturer_nautobot=NAUTOBOT_MANUFACTURER_JUNIPER,
-        registry_key="juniper_devices",
-        **params,
-    )
-    nokia = load_inventory_devices(
-        manufacturer_netbox=NETBOX_MANUFACTURER_NOKIA,
-        manufacturer_nautobot=NAUTOBOT_MANUFACTURER_NOKIA,
-        registry_key="nokia_devices",
-        **params,
-    )
-    return {
-        "cisco": len(cisco),
-        "juniper": len(juniper),
-        "nokia": len(nokia),
-    }
+    external: dict[str, dict] = {}
+    if params["netbox_url"] or params["nautobot_url"]:
+        for vendor, (nb_key, nauto_key, default) in _INVENTORY_VENDORS.items():
+            found = load_inventory_devices(
+                manufacturer_netbox=get_setting(nb_key, default),
+                manufacturer_nautobot=get_setting(nauto_key, default),
+                registry_key=f"{vendor}_devices",
+                **params,
+            )
+            for name, host in found.items():
+                external[name] = {
+                    "host": host,
+                    "port": None,
+                    "vendor": vendor,
+                    "platform": vendor,
+                    "site": "",
+                    "netconf_port": None,
+                    "source": "inventory",
+                }
+    set_external_devices(external)
+    reload_registry()
+
+    counts = {vendor: 0 for vendor in _INVENTORY_VENDORS}
+    for device in list_devices():
+        counts[device["vendor"]] = counts.get(device["vendor"], 0) + 1
+    return counts

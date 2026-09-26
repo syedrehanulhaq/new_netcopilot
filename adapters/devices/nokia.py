@@ -15,103 +15,48 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import threading
-import time
-from contextlib import contextmanager
 from typing import Any, Callable, Optional
 
 from credentials import get_secret
 from adapters.devices.registry import resolve_host
 from adapters.devices.pool import get_pool, CircuitOpenError
+from adapters.devices.safety import UnsafeInputError, reject_control_chars, validate_cli_command
+from adapters.devices.ssh_cache import SSHSessionCache
 
 logger = logging.getLogger("netcopilot.adapters.nokia")
 
 # ---------------------------------------------------------------------------
-# SSH connection cache — reuse sessions instead of reconnecting each tool call
+# SSH sessions — reused across tool calls, each checked out exclusively
 # ---------------------------------------------------------------------------
 
-_SSH_TTL = 90.0
-_SSH_MAX_CACHED = 20
-
-_conn_cache: dict[str, tuple[Any, float]] = {}
-_conn_lock = threading.Lock()
+_SESSIONS = SSHSessionCache("nokia")
 
 
-def _get_cached_ssh(device_name: str):
-    with _conn_lock:
-        entry = _conn_cache.get(device_name)
-        if entry is None:
-            return None
-        conn, last_used = entry
-        if time.monotonic() - last_used > _SSH_TTL:
-            _conn_cache.pop(device_name, None)
-            try:
-                conn.disconnect()
-            except Exception:
-                pass
-            return None
-        _conn_cache[device_name] = (conn, time.monotonic())
-        return conn
-
-
-def _put_cached_ssh(device_name: str, conn) -> None:
-    with _conn_lock:
-        if len(_conn_cache) >= _SSH_MAX_CACHED and device_name not in _conn_cache:
-            oldest = min(_conn_cache, key=lambda k: _conn_cache[k][1])
-            old_conn, _ = _conn_cache.pop(oldest)
-            try:
-                old_conn.disconnect()
-            except Exception:
-                pass
-        _conn_cache[device_name] = (conn, time.monotonic())
-
-
-def _evict_ssh(device_name: str) -> None:
-    with _conn_lock:
-        entry = _conn_cache.pop(device_name, None)
-    if entry:
-        try:
-            entry[0].disconnect()
-        except Exception:
-            pass
-
-
-@contextmanager
-def _ssh(device_name: str):
-    """Yield a Netmiko SSH session, reusing a cached connection when available."""
+def _connect(device_name: str):
     from netmiko import ConnectHandler
 
-    conn = _get_cached_ssh(device_name)
-    fresh = conn is None
+    host, port = resolve_host(device_name)
+    user = get_secret("NOKIA_USER", "")
+    passwd = get_secret("NOKIA_PASS", "")
+    if not user or not passwd:
+        raise RuntimeError("NOKIA_USER or NOKIA_PASS not configured.")
 
-    if fresh:
-        host, port = resolve_host(device_name)
-        user = get_secret("NOKIA_USER", "")
-        passwd = get_secret("NOKIA_PASS", "")
-        if not user or not passwd:
-            raise RuntimeError("NOKIA_USER or NOKIA_PASS not configured.")
+    params: dict[str, Any] = {
+        "device_type": "nokia_sros",
+        "host": host,
+        "username": user,
+        "password": passwd,
+        "fast_cli": True,
+        "conn_timeout": int(get_secret("NETCONF_TIMEOUT", "30")),
+    }
+    if port:
+        params["port"] = port
+    return ConnectHandler(**params)
 
-        params: dict[str, Any] = {
-            "device_type": "nokia_sros",
-            "host": host,
-            "username": user,
-            "password": passwd,
-            "fast_cli": True,
-            "conn_timeout": int(get_secret("NETCONF_TIMEOUT", "30")),
-        }
-        if port:
-            params["port"] = port
-        conn = ConnectHandler(**params)
-        logger.debug("SSH new connection to %s", device_name)
-    else:
-        logger.debug("SSH reusing cached connection to %s", device_name)
 
-    try:
-        yield conn
-        _put_cached_ssh(device_name, conn)
-    except Exception:
-        _evict_ssh(device_name)
-        raise
+def _ssh(device_name: str, fresh: bool = False):
+    """Yield an exclusive Netmiko session; it is dropped if the block raises."""
+    return _SESSIONS.session(device_name, lambda: _connect(device_name), fresh=fresh)
 
 
 def _cli(device: str, command: str) -> str:
@@ -121,7 +66,7 @@ def _cli(device: str, command: str) -> str:
             return conn.send_command(command)
     except Exception:
         logger.debug("SSH retry with fresh connection to %s", device)
-        with _ssh(device) as conn:
+        with _ssh(device, fresh=True) as conn:
             return conn.send_command(command)
 
 
@@ -131,7 +76,7 @@ def _run_cli(device: str, command: str) -> dict[str, Any]:
         output = _cli(device, command)
         return {"device": device, "command": command, "output": output, "raw_output": output}
     except Exception as exc:
-        return {"device": device, "command": command, "error": str(exc)}
+        return {"device": device, "command": command, "error": _scrub_error(str(exc))}
 
 
 _EXECUTOR_TIMEOUT = 60.0
@@ -149,6 +94,10 @@ def _err(device: str, exc: Exception, **extra) -> dict:
 
 async def _run_tool(device: str, fn, *fn_args, **err_extra) -> dict:
     """Run sync fn(*fn_args) in executor with circuit breaker, timeout, and error scrubbing."""
+    try:
+        reject_control_chars(device, *fn_args)
+    except UnsafeInputError as exc:
+        return {"error": f"Rejected unsafe input: {exc}", "device": device, **err_extra}
     _pool = get_pool()
     try:
         async with _pool.acquire(device):
@@ -269,12 +218,10 @@ def _sync_get_traceroute(device: str, destination: str) -> dict:
 
 
 def _sync_run_command(device: str, command: str) -> dict:
-    allowed = ("show ", "debug ", "admin show", "ping ", "traceroute ")
-    if not any(command.strip().lower().startswith(p) for p in allowed):
-        return {
-            "device": device, "command": command,
-            "error": f"Command rejected. Only read-only commands allowed: {allowed}",
-        }
+    try:
+        command = validate_cli_command("nokia", command)
+    except UnsafeInputError as exc:
+        return {"device": device, "command": command, "error": f"Command rejected: {exc}"}
     return _run_cli(device, command)
 
 

@@ -2,6 +2,16 @@ from typing import Any, Optional
 
 import httpx
 
+# Block Kit limits: button value 2000 chars, section text 3000 chars.
+_BUTTON_VALUE_MAX = 2000
+_SECTION_TEXT_MAX = 2900
+
+
+def _button_value(device: str, interface: str, severity: str, alert_text: str) -> str:
+    """Encode alert context as 'device|interface|severity|alert_text' within Slack's limit."""
+    prefix = f"{device}|{interface}|{severity}|"
+    return prefix + alert_text[: max(0, _BUTTON_VALUE_MAX - len(prefix))]
+
 
 class SlackAdapter:
     name = "slack"
@@ -42,7 +52,7 @@ class SlackAdapter:
         severity_emoji = {"critical": "🔴", "major": "🟠", "minor": "🟡", "info": "🔵"}.get(
             (severity or "").lower(), "⚠️"
         )
-        header = f"{severity_emoji} *ALERT: {alert_text}*"
+        header = f"{severity_emoji} *ALERT: {alert_text[:_SECTION_TEXT_MAX - 20]}*"
         context_parts = [p for p in [
             f"Device: `{device}`" if device else "",
             f"Interface: `{interface}`" if interface else "",
@@ -69,13 +79,13 @@ class SlackAdapter:
                     "text": {"type": "plain_text", "text": "🔍 Investigate", "emoji": True},
                     "style": "primary",
                     "action_id": action_id,
-                    "value": f"{device}|{interface}|{severity}|{alert_text}",
+                    "value": _button_value(device, interface, severity, alert_text),
                 },
                 {
                     "type": "button",
                     "text": {"type": "plain_text", "text": "🎫 Create Ticket", "emoji": True},
                     "action_id": "netcopilot_create_ticket",
-                    "value": f"{device}|{interface}|{severity}|{alert_text}",
+                    "value": _button_value(device, interface, severity, alert_text),
                 },
             ],
         })
@@ -100,7 +110,7 @@ class SlackAdapter:
         max_len = 2800
         display = findings if len(findings) <= max_len else findings[:max_len] + "\n_…truncated_"
 
-        button_value = f"{device}|{interface}|{severity}|{alert_text}"
+        button_value = _button_value(device, interface, severity, alert_text)
 
         blocks: list[dict[str, Any]] = [
             {

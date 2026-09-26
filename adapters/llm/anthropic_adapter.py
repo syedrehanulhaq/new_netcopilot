@@ -82,6 +82,15 @@ def _convert_tools(openai_tools: list) -> list:
     return result
 
 
+def _is_error_result(content: Any) -> bool:
+    """Tool results are JSON objects; an 'error' key marks a failed call."""
+    try:
+        parsed = json.loads(content) if isinstance(content, str) else content
+    except (TypeError, ValueError):
+        return False
+    return isinstance(parsed, dict) and "error" in parsed
+
+
 def _convert_messages(messages: list) -> tuple[Optional[str], list]:
     """Convert OpenAI-format messages to Anthropic format.
 
@@ -127,11 +136,14 @@ def _convert_messages(messages: list) -> tuple[Optional[str], list]:
                     if r != "tool":
                         break
                     if isinstance(m, dict):
-                        tool_results.append({
+                        block = {
                             "type": "tool_result",
                             "tool_use_id": m["tool_call_id"],
                             "content": m.get("content", ""),
-                        })
+                        }
+                        if _is_error_result(block["content"]):
+                            block["is_error"] = True
+                        tool_results.append(block)
                     i += 1
                 anthropic_messages.append({"role": "user", "content": tool_results})
                 continue
@@ -193,6 +205,13 @@ def _build_response(anthropic_response) -> _Response:
 
     text_content = "\n".join(text_parts) if text_parts else None
 
+    stop_reason = anthropic_response.stop_reason  # "end_turn" / "tool_use" / "refusal" / "max_tokens"
+    if not text_content and not tool_calls:
+        if stop_reason == "refusal":
+            text_content = "The model declined to answer this request."
+        elif stop_reason == "max_tokens":
+            text_content = "The response was cut off (max_tokens reached). Please narrow the question."
+
     msg = _Message(
         content=text_content,
         role="assistant",
@@ -200,7 +219,6 @@ def _build_response(anthropic_response) -> _Response:
         _anthropic_content=content_blocks,
     )
 
-    stop_reason = anthropic_response.stop_reason  # "end_turn" / "tool_use"
     finish_reason = "tool_calls" if stop_reason == "tool_use" else "stop"
 
     return _Response(choices=[_Choice(message=msg, finish_reason=finish_reason)])

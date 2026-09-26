@@ -29,12 +29,13 @@ def load_inventory_devices(
     )
     devices.update(nautobot.load_devices(manufacturer=manufacturer_nautobot, registry_key=registry_key))
 
-    yaml_adapter = YAMLInventoryAdapter(registry_path)
-    devices.update(
-        yaml_adapter.load_devices(
-            manufacturer=manufacturer_netbox or manufacturer_nautobot,
-            registry_key=registry_key,
+    if registry_path:
+        yaml_adapter = YAMLInventoryAdapter(registry_path)
+        devices.update(
+            yaml_adapter.load_devices(
+                manufacturer=manufacturer_netbox or manufacturer_nautobot,
+                registry_key=registry_key,
+            )
         )
-    )
 
     return devices

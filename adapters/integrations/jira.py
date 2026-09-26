@@ -42,6 +42,16 @@ def _default_issue_type() -> str:
 def _default_priority() -> str:
     return get_secret("JIRA_DEFAULT_PRIORITY", "Medium")
 
+_ISSUE_KEY = re.compile(r"^[A-Z][A-Z0-9_]*-\d+$")
+
+
+def _check_issue_key(issue_key: str) -> Optional[str]:
+    """issue_key is interpolated into REST paths — accept only real keys like NOC-123."""
+    if not _ISSUE_KEY.match(str(issue_key or "")):
+        return f"Invalid Jira issue key {issue_key!r} (expected e.g. 'NOC-123')."
+    return None
+
+
 def _check_config() -> Optional[str]:
     missing = [k for k in ("JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_PROJECT_KEY")
                if not get_secret(k, "")]
@@ -190,7 +200,7 @@ def _sync_create_ticket(
 
 
 def _sync_close_ticket(issue_key: str, transition_name: str = "Done") -> Dict[str, Any]:
-    err = _check_config()
+    err = _check_issue_key(issue_key) or _check_config()
     if err:
         return {"error": err}
 
@@ -208,7 +218,7 @@ def _sync_close_ticket(issue_key: str, transition_name: str = "Done") -> Dict[st
 
 
 def _sync_add_comment(issue_key: str, comment: str) -> Dict[str, Any]:
-    err = _check_config()
+    err = _check_issue_key(issue_key) or _check_config()
     if err:
         return {"error": err}
     try:
@@ -229,7 +239,7 @@ def _sync_update_fields(
     labels: Optional[List[str]] = None,
     summary: Optional[str] = None,
 ) -> Dict[str, Any]:
-    err = _check_config()
+    err = _check_issue_key(issue_key) or _check_config()
     if err:
         return {"error": err}
 

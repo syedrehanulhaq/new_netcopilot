@@ -18,3 +18,5 @@ docs/
 *.md
 .gitignore
 .github/
+tests/
+requirements-dev.txt

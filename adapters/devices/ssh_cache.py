@@ -1,0 +1,98 @@
+"""
+SSH session cache shared by the Netmiko-based adapters (Cisco, Nokia, Aruba).
+
+Sessions are checked out for exclusive use and checked back in when the call
+succeeds. A Netmiko connection is a single interactive channel, so two tool
+calls must never drive the same connection at once — the previous per-adapter
+caches handed the same object to concurrent calls, which interleaved commands
+and mixed their output.
+
+Usage:
+    _SESSIONS = SSHSessionCache("cisco")
+
+    with _SESSIONS.session(device, lambda: ConnectHandler(**params)) as conn:
+        conn.send_command("show version")
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator, Optional
+
+logger = logging.getLogger("netcopilot.ssh_cache")
+
+
+def _disconnect(conn: Any) -> None:
+    try:
+        conn.disconnect()
+    except Exception:
+        pass
+
+
+class SSHSessionCache:
+    def __init__(self, name: str, ttl: float = 90.0, max_idle: int = 20) -> None:
+        self.name = name
+        self.ttl = ttl
+        self.max_idle = max_idle
+        self._idle: dict[str, list[tuple[Any, float]]] = {}
+        self._lock = threading.Lock()
+
+    def checkout(self, device: str) -> Optional[Any]:
+        """Remove and return a fresh-enough idle session for device, or None."""
+        stale: list[Any] = []
+        conn = None
+        now = time.monotonic()
+        with self._lock:
+            entries = self._idle.get(device, [])
+            while entries:
+                candidate, last_used = entries.pop()
+                if now - last_used <= self.ttl:
+                    conn = candidate
+                    break
+                stale.append(candidate)
+            if not entries:
+                self._idle.pop(device, None)
+        for old in stale:
+            _disconnect(old)
+        return conn
+
+    def checkin(self, device: str, conn: Any) -> None:
+        """Return a healthy session to the idle pool, evicting the oldest if full."""
+        evicted: list[Any] = []
+        with self._lock:
+            while sum(len(v) for v in self._idle.values()) >= self.max_idle:
+                oldest_dev = min(self._idle, key=lambda d: self._idle[d][0][1])
+                evicted.append(self._idle[oldest_dev].pop(0)[0])
+                if not self._idle[oldest_dev]:
+                    del self._idle[oldest_dev]
+            self._idle.setdefault(device, []).append((conn, time.monotonic()))
+        for old in evicted:
+            _disconnect(old)
+
+    def idle_count(self, device: Optional[str] = None) -> int:
+        with self._lock:
+            if device is not None:
+                return len(self._idle.get(device, []))
+            return sum(len(v) for v in self._idle.values())
+
+    @contextmanager
+    def session(self, device: str, connect: Callable[[], Any], fresh: bool = False) -> Iterator[Any]:
+        """
+        Yield an exclusive session. On success it goes back to the pool; on any
+        exception it is disconnected so the next call starts clean.
+        """
+        conn = None if fresh else self.checkout(device)
+        if conn is None:
+            conn = connect()
+            logger.debug("[%s] SSH new connection to %s", self.name, device)
+        else:
+            logger.debug("[%s] SSH reusing cached connection to %s", self.name, device)
+        try:
+            yield conn
+        except BaseException:
+            _disconnect(conn)
+            raise
+        self.checkin(device, conn)

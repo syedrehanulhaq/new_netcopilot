@@ -172,10 +172,14 @@ class MCPClient:
                     url,
                 )
             except Exception as exc:
+                # anyio wraps the real cause (e.g. connection refused) in an ExceptionGroup
+                while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
+                    exc = exc.exceptions[0]
                 logger.warning(
-                    "MCP server unavailable: %s  url=%s  reason=%s",
+                    "MCP server unavailable: %s  url=%s  reason=%s: %s",
                     name,
                     url,
+                    type(exc).__name__,
                     exc,
                 )
 

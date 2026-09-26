@@ -3,7 +3,13 @@
 ## 1) Open a terminal and go to the project
 
 ```
-cd /Users/syedhaq/netcopilot
+cd /Users/syedhaq/new_netcopilot
+```
+
+First time only — Python 3.10+ is required (the `mcp`, `mcp-atlassian` and `anthropic` packages need it):
+```
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
 ```
 
 ## 2) Start LiteLLM (if using Bedrock/OpenAI via proxy)
@@ -55,6 +61,15 @@ curl -sS http://127.0.0.1:9090/-/healthy
 ```
 
 ---
+
+# Tests
+
+```
+.venv/bin/python -m pytest -q tests
+```
+
+The suite uses a temporary data directory and fake devices/LLM — it never touches
+real devices, your `devices.yaml`, or the `.db` files.
 
 # Quick Notes
 

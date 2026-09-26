@@ -1,5 +1,7 @@
 from typing import Dict
 
+_MAX_PAGES = 100  # 100 pages x 1000 devices
+
 
 class NetBoxInventoryAdapter:
     name = "netbox"
@@ -27,21 +29,29 @@ class NetBoxInventoryAdapter:
                     params[key] = value
 
         headers = {"Authorization": f"Token {self.token}"}
+        results: list = []
         try:
             import httpx
 
             with httpx.Client(timeout=15, verify=self.verify_ssl) as client:
-                resp = client.get(url, headers=headers, params=params)
-            if resp.status_code >= 300:
-                print(f"WARNING: NetBox API error {resp.status_code}.")
-                return {}
-            data = resp.json()
+                next_url, next_params = url, params
+                for _ in range(_MAX_PAGES):
+                    resp = client.get(next_url, headers=headers, params=next_params)
+                    if resp.status_code >= 300:
+                        print(f"WARNING: NetBox API error {resp.status_code}.")
+                        return {}
+                    data = resp.json()
+                    results.extend(data.get("results", []))
+                    next_url = data.get("next")
+                    if not next_url:
+                        break
+                    next_params = None  # "next" already carries the query string
         except Exception as exc:
             print(f"WARNING: NetBox fetch failed: {exc}")
             return {}
 
         devices: Dict[str, str] = {}
-        for item in data.get("results", []):
+        for item in results:
             name = item.get("name")
             ip = None
             primary_ip4 = item.get("primary_ip4") or {}

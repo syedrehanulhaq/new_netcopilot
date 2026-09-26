@@ -14,9 +14,10 @@ MCPClient connects to them over SSE/streamable-http at startup.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
-from adapters.devices.registry import get_vendor, correct_tool_vendor, list_devices
+from adapters.devices.registry import get_vendor, correct_tool_vendor
+from adapters.devices.safety import UnsafeInputError, validate_tool_args
 
 logger = logging.getLogger("netcopilot.dispatcher")
 
@@ -37,6 +38,11 @@ _INTEGRATION_MODULES: dict[str, str] = {
 
 _DEVICE_PREFIXES      = tuple(f"{v}_" for v in _VENDOR_MODULES)
 _INTEGRATION_PREFIXES = tuple(f"{v}_" for v in _INTEGRATION_MODULES)
+
+# Unprefixed playbook tool names that are served by an integration, not a device
+_PLAYBOOK_INTEGRATION_ALIASES: dict[str, str] = {
+    "get_top_flapping_links": "prometheus_get_top_flapping_links",
+}
 
 
 def _is_device_tool(tool_name: str) -> bool:
@@ -146,6 +152,11 @@ class ToolDispatcher:
             tool_name = correct_tool_vendor(tool_name, device)
 
         if _is_device_tool(tool_name):
+            try:
+                validate_tool_args(arguments)
+            except UnsafeInputError as exc:
+                logger.warning("Rejected unsafe arguments for %s: %s", tool_name, exc)
+                return {"error": f"Rejected unsafe input: {exc}", "device": device}
             return await self._call_adapter_tool(tool_name, arguments, _VENDOR_MODULES)
 
         # Integration tools: check vendor MCP first (has richer tool set),
@@ -170,12 +181,17 @@ class ToolDispatcher:
         Example: call_tool_unprefixed("get_bgp_summary", {"device": "pe1"})
                  → internally calls call_tool("junos_get_bgp_summary", {"device": "pe1"})
         """
+        if tool_name in _PLAYBOOK_INTEGRATION_ALIASES:
+            return await self.call_tool(_PLAYBOOK_INTEGRATION_ALIASES[tool_name], arguments)
+        if _is_integration_tool(tool_name):
+            return await self.call_tool(tool_name, arguments)
+
         device = arguments.get("device", "")
         if device:
             vendor = get_vendor(device)
             if vendor:
                 return await self.call_tool(f"{vendor}_{tool_name}", arguments)
-        # No device or unknown device — try direct (integration tools, prometheus etc.)
+            return {"error": f"Unknown device '{device}' — not in the device inventory."}
         return await self.call_tool(tool_name, arguments)
 
     # ------------------------------------------------------------------
@@ -204,7 +220,7 @@ class ToolDispatcher:
         tools_map: dict[str, Callable] = getattr(mod, "TOOLS", {})
         func = tools_map.get(base_name)
         if not func:
-            return {"error": f"Tool '{base_name}' not found in '{prefix}' adapter"}
+            return {"error": f"Tool '{base_name}' not found in '{prefix}' adapter", "unsupported": True}
 
         try:
             return await func(**arguments)

@@ -7,7 +7,7 @@ Priority order (first match wins):
   3. Environment vars  — os.environ / .env fallback
 
 Usage:
-    from secrets import get_secret
+    from credentials import get_secret
 
     password = get_secret("CISCO_PASS")
 

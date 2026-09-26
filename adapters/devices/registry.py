@@ -37,7 +37,19 @@ _VENDOR_ALIASES = {
     "sros": "nokia",
     "sr-os": "nokia",
     "alcatel": "nokia",
+    "aruba": "aruba",
+    "aoscx": "aruba",
+    "aos-cx": "aruba",
+    "arubaos-cx": "aruba",
+    "aosswitch": "aruba",
+    "aos-switch": "aruba",
+    "procurve": "aruba",
 }
+
+
+def normalize_vendor(value: str) -> str:
+    """Map a vendor/platform alias (e.g. 'juniper', 'ios-xr') to its adapter prefix, or ''."""
+    return _VENDOR_ALIASES.get(str(value or "").strip().lower(), "")
 
 
 def _load() -> dict[str, dict]:
@@ -60,7 +72,7 @@ def _load() -> dict[str, dict]:
         for name, cfg in (raw["devices"] or {}).items():
             if not isinstance(cfg, dict):
                 continue
-            vendor = _VENDOR_ALIASES.get(str(cfg.get("vendor", "")).lower(), "")
+            vendor = normalize_vendor(cfg.get("vendor", ""))
             if not vendor:
                 logger.warning("Device '%s' has no vendor field — skipping.", name)
                 continue
@@ -71,13 +83,15 @@ def _load() -> dict[str, dict]:
                 "platform": cfg.get("platform", vendor),
                 "site": cfg.get("site", ""),
                 "netconf_port": cfg.get("netconf_port"),
+                "source": "devices.yaml",
             }
 
-    # Legacy format: cisco_devices / juniper_devices / nokia_devices
+    # Legacy format: cisco_devices / juniper_devices / nokia_devices / aruba_devices
     for section, vendor in [
         ("cisco_devices", "cisco"),
         ("juniper_devices", "junos"),
         ("nokia_devices", "nokia"),
+        ("aruba_devices", "aruba"),
     ]:
         for name, value in (raw.get(section) or {}).items():
             if str(name) in devices:
@@ -91,6 +105,7 @@ def _load() -> dict[str, dict]:
                 "platform": vendor,
                 "site": "",
                 "netconf_port": None,
+                "source": "devices.yaml",
             }
 
     return devices
@@ -100,14 +115,34 @@ def _load() -> dict[str, dict]:
 _cache: dict[str, dict] = {}
 _cache_lock = threading.Lock()
 
+# Devices discovered from NetBox / Nautobot (set by config.reload_inventory_devices).
+# devices.yaml entries win over these on name collisions.
+_external: dict[str, dict] = {}
+
+
+def set_external_devices(devices: dict[str, dict]) -> None:
+    """Replace the source-of-truth (NetBox/Nautobot) device set merged into the registry."""
+    global _external
+    with _cache_lock:
+        _external = dict(devices)
+
 
 def reload_registry() -> None:
     """Reload device registry atomically (thread-safe)."""
     new_cache = _load()  # expensive I/O outside the lock
     with _cache_lock:
         global _cache
-        _cache = new_cache
-    logger.info("Device registry loaded: %d devices", len(new_cache))
+        merged = dict(_external)
+        merged.update(new_cache)
+        _cache = merged
+    logger.info(
+        "Device registry loaded: %d devices (%d from devices.yaml, %d from inventory sources)",
+        len(merged), len(new_cache), len(merged) - len(new_cache),
+    )
+
+
+def registry_path() -> str:
+    return _REGISTRY_PATH
 
 
 def _registry() -> dict[str, dict]:
@@ -160,6 +195,22 @@ def list_devices() -> list[dict]:
             "site": info.get("site", ""),
         }
         for name, info in _registry().items()
+    ]
+
+
+def list_devices_detailed() -> list[dict]:
+    """Return all registered devices with connection targets (admin inventory view)."""
+    return [
+        {
+            "name": name,
+            "vendor": info["vendor"],
+            "platform": info["platform"],
+            "host": info["host"],
+            "port": info.get("port"),
+            "site": info.get("site", ""),
+            "source": info.get("source", ""),
+        }
+        for name, info in sorted(_registry().items())
     ]
 
 

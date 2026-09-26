@@ -15,7 +15,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Optional
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 
 import httpx
 import yaml
@@ -59,7 +59,12 @@ from config import (
     reload_inventory_devices,
 )
 from adapters.devices.dispatcher import ToolDispatcher
-from adapters.devices.registry import device_inventory_summary, reload_registry
+from adapters.devices.registry import (
+    device_inventory_summary,
+    list_devices_detailed,
+    normalize_vendor,
+    registry_path,
+)
 from llm.prompts import build_system_prompt
 from mcp_client.client import MCPClient
 from playbooks.store import (
@@ -69,6 +74,7 @@ from playbooks.store import (
     upsert_playbooks,
 )
 from settings import (
+    data_path,
     get_setting,
     get_setting_bool,
     get_setting_int,
@@ -150,7 +156,8 @@ async def lifespan(app: FastAPI):
         )
     _init_memory_db()
     _init_alerts_db()
-    reload_registry()
+    # devices.yaml + NetBox/Nautobot (if configured) → device registry
+    await asyncio.to_thread(reload_inventory_devices)
     _mcp_client = MCPClient(config_path="mcp_servers.yaml")
     await _mcp_client.start()
     _dispatcher = ToolDispatcher(mcp_client=_mcp_client)
@@ -226,6 +233,8 @@ _SETTINGS_SCHEMA = [
     {"key": "JUNIPER_PASS", "label": "Juniper password", "category": "Devices", "secret": True},
     {"key": "NOKIA_USER", "label": "Nokia username", "category": "Devices"},
     {"key": "NOKIA_PASS", "label": "Nokia password", "category": "Devices", "secret": True},
+    {"key": "ARUBA_USER", "label": "Aruba username", "category": "Devices"},
+    {"key": "ARUBA_PASS", "label": "Aruba password", "category": "Devices", "secret": True},
     {"key": "NETCONF_PORT", "label": "NETCONF port", "category": "Devices"},
     {"key": "NETCONF_TIMEOUT", "label": "NETCONF timeout (seconds)", "category": "Devices"},
     {"key": "NETBOX_URL", "label": "NetBox URL", "category": "Inventory"},
@@ -235,6 +244,7 @@ _SETTINGS_SCHEMA = [
     {"key": "NETBOX_MANUFACTURER_CISCO", "label": "NetBox Cisco manufacturer", "category": "Inventory"},
     {"key": "NETBOX_MANUFACTURER_JUNIPER", "label": "NetBox Juniper manufacturer", "category": "Inventory"},
     {"key": "NETBOX_MANUFACTURER_NOKIA", "label": "NetBox Nokia manufacturer", "category": "Inventory"},
+    {"key": "NETBOX_MANUFACTURER_ARUBA", "label": "NetBox Aruba manufacturer", "category": "Inventory"},
     {"key": "NAUTOBOT_URL", "label": "Nautobot URL", "category": "Inventory"},
     {"key": "NAUTOBOT_TOKEN", "label": "Nautobot token", "category": "Inventory", "secret": True},
     {"key": "NAUTOBOT_VERIFY_SSL", "label": "Nautobot verify SSL", "category": "Inventory"},
@@ -242,6 +252,7 @@ _SETTINGS_SCHEMA = [
     {"key": "NAUTOBOT_MANUFACTURER_CISCO", "label": "Nautobot Cisco manufacturer", "category": "Inventory"},
     {"key": "NAUTOBOT_MANUFACTURER_JUNIPER", "label": "Nautobot Juniper manufacturer", "category": "Inventory"},
     {"key": "NAUTOBOT_MANUFACTURER_NOKIA", "label": "Nautobot Nokia manufacturer", "category": "Inventory"},
+    {"key": "NAUTOBOT_MANUFACTURER_ARUBA", "label": "Nautobot Aruba manufacturer", "category": "Inventory"},
     {
         "key": "INVENTORY_WEBHOOK_TOKEN",
         "label": "Inventory webhook token (X-Webhook-Token)",
@@ -288,6 +299,7 @@ _SETTINGS_SCHEMA = [
     {"key": "RATE_LIMIT_PER_MIN", "label": "Rate limit per minute", "category": "Security"},
     {"key": "TOOL_ALLOWLIST", "label": "Tool allowlist (comma-separated)", "category": "Security"},
     {"key": "TOOL_DENYLIST", "label": "Tool denylist (comma-separated)", "category": "Security"},
+    {"key": "TOOL_RESULT_MAX_CHARS", "label": "Max characters per tool result sent to the LLM", "category": "Security"},
     {"key": "CHAT_RETENTION_DAYS", "label": "Chat retention (days)", "category": "Security"},
     {"key": "ALERT_RETENTION_DAYS", "label": "Alert retention (days)", "category": "Security"},
     {"key": "LOG_REDACTION_ENABLED", "label": "Log redaction enabled", "category": "Security"},
@@ -413,7 +425,7 @@ def _is_tool_allowed(tool_name: str) -> bool:
 
 _memory_lock = threading.Lock()
 _memory_limit = 12
-_memory_db_path = "memory.db"
+_memory_db_path = data_path("memory.db")
 
 
 def _init_memory_db() -> None:
@@ -467,11 +479,36 @@ def _save_memory(user: str, turns: list[dict[str, str]]) -> None:
         )
 
 
+def _clear_memory(user: str) -> int:
+    with sqlite3.connect(_memory_db_path) as conn:
+        return conn.execute("DELETE FROM memory WHERE user = ?", (user,)).rowcount
+
+
+def _resolve_user(request: Request, supplied: str) -> str:
+    """
+    Identity used to key conversation memory.
+
+    A signed-in (Auth0) session always wins over the client-supplied name, so
+    one user cannot read or pollute another user's history by sending their
+    name. API-key callers name their own users, namespaced per key. With no
+    auth configured the client-supplied id is used as-is.
+    """
+    session_user = request.session.get("user") if "session" in request.scope else None
+    if session_user and (session_user.get("email") or session_user.get("name")):
+        return str(session_user.get("email") or session_user.get("name"))
+    supplied = (supplied or "unknown").strip()[:128] or "unknown"
+    api_key = request.headers.get("X-API-Key", "")
+    if api_key and api_key in _parse_api_keys():
+        key_id = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:10]
+        return f"apikey-{key_id}:{supplied}"
+    return supplied
+
+
 # ---------------------------------------------------------------------------
 # Alerts DB
 # ---------------------------------------------------------------------------
 
-_alert_db_path = "alerts.db"
+_alert_db_path = data_path("alerts.db")
 _inventory_webhook_lock = threading.Lock()
 _inventory_webhook_last_reload = 0.0
 
@@ -620,19 +657,35 @@ def _audit_log(payload: dict[str, Any]) -> None:
     audit_logger.info(json.dumps(_redact_payload(payload), ensure_ascii=True))
 
 
+# Imperative change requests ("configure ...", "please shut down ge-0/0/1").
+# Anchored at the start so questions about changes ("when was the last commit?",
+# "did someone change the config?") and alert texts ("state change detected")
+# are not refused. The hard guarantee is enforced in the tool layer
+# (adapters/devices/safety.py): no device tool can send a non-read-only command.
+_CHANGE_REQUEST = re.compile(
+    r"^\s*(?:(?:please|pls|kindly|can you|could you|would you|go ahead and|now)\s+)*"
+    r"(?:configure|conf\s+t|apply|commit|rollback|roll\s+back|shut\s*down|shut|no\s+shut(?:down)?|"
+    r"enable|disable|set|delete|remove|add|change|modify|update|push|deploy|provision|"
+    r"reboot|reload|restart|clear|bounce|reset)\b",
+    re.IGNORECASE,
+)
+
+_READ_ONLY_REPLY = (
+    "NetCopilot is in read-only mode and cannot provide configuration commands. "
+    "If you want, I can open a change ticket instead."
+)
+
+
+# Ticket operations ("update NOC-123 priority", "add a comment to the ticket") are allowed actions.
+_TICKET_WORD = re.compile(r"\b(?:ticket|jira|issue)\b", re.IGNORECASE)
+_JIRA_KEY = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")  # case-sensitive: "ge-0/0/1" is not a key
+
+
 def _is_config_request(message: str) -> bool:
-    normalized = message.lower()
-    if normalized.strip().startswith(("show ", "display ")):
+    message = message or ""
+    if not _CHANGE_REQUEST.match(message):
         return False
-    if "show config" in normalized or "show configuration" in normalized:
-        return False
-    if "display configuration" in normalized:
-        return False
-    pattern = re.compile(
-        r"\b(configure|configuration|apply|commit|rollback|shutdown|no shutdown|enable|disable|"
-        r"set\s+|delete\s+|replace\s+|edit\s+|change\s+|modify\s+|update\s+)\b"
-    )
-    return bool(pattern.search(normalized))
+    return not (_TICKET_WORD.search(message) or _JIRA_KEY.search(message))
 
 
 def _get_llm_settings() -> dict[str, str]:
@@ -703,6 +756,41 @@ class AlertIngestRequest(BaseModel):
 # Core chat loop (async — MCP tool calls are awaited)
 # ---------------------------------------------------------------------------
 
+_TOOL_RESULT_MAX_CHARS = 24_000
+
+
+def _compact_tool_result(result: Any) -> str:
+    """
+    Serialize a tool result for the LLM, bounded in size.
+
+    Adapters often return parsed fields plus the full CLI text (sometimes twice,
+    as 'output' and 'raw_output'). Unbounded, one large output (e.g. a full
+    routing table) overflows the model's context and fails the whole request.
+    """
+    limit = max(2_000, get_setting_int("TOOL_RESULT_MAX_CHARS", _TOOL_RESULT_MAX_CHARS))
+    if isinstance(result, dict) and "raw_output" in result and result.get("output") == result["raw_output"]:
+        result = {k: v for k, v in result.items() if k != "raw_output"}
+    text = json.dumps(result, default=str)
+    if len(text) <= limit:
+        return text
+
+    if isinstance(result, dict):
+        trimmed = dict(result)
+        overflow = len(text) - limit
+        for key in ("raw_output", "output"):
+            value = trimmed.get(key)
+            if isinstance(value, str) and overflow > 0:
+                keep = max(1_000, len(value) - overflow - 200)
+                if keep < len(value):
+                    overflow -= len(value) - keep
+                    trimmed[key] = value[:keep] + "\n...[output truncated]"
+        trimmed["truncated"] = True
+        text = json.dumps(trimmed, default=str)
+        if len(text) <= limit:
+            return text
+    return json.dumps({"truncated": True, "partial_result": text[:limit]})
+
+
 async def _agentic_loop(
     request_id: str,
     messages: list,
@@ -715,7 +803,7 @@ async def _agentic_loop(
     Async generator — the core agentic tool loop.
 
     Each iteration:
-      1. Call the LLM.
+      1. Call the LLM (in a worker thread — the SDK clients are synchronous).
       2. If no tool calls → yield {"type": "reply", "content": ...} and return.
       3. If tool calls → run them ALL in parallel, append results, repeat.
 
@@ -732,12 +820,17 @@ async def _agentic_loop(
         yield {"type": "error", "text": "LLM not configured."}
         return
 
+    # The role-filtered list the LLM was offered is also what it may execute.
+    offered_tools = {t["function"]["name"] for t in tools if isinstance(t, dict) and "function" in t}
+
     async def _exec_one(tc) -> tuple[dict, dict]:
         """Execute one tool call; returns (end_event, tool_result_message)."""
         name = tc.function.name
         try:
             args = json.loads(tc.function.arguments)
         except (json.JSONDecodeError, ValueError):
+            args = {}
+        if not isinstance(args, dict):
             args = {}
 
         tool_start = time.time()
@@ -746,27 +839,35 @@ async def _agentic_loop(
             _metrics["tool_calls_total"] += 1
             _metrics["tool_counts"][name] = _metrics["tool_counts"].get(name, 0) + 1
 
-        if not _is_tool_allowed(name):
-            result: Any = {"error": f"Tool '{name}' is blocked by server policy."}
+        if name not in offered_tools:
+            result: Any = {"error": f"Tool '{name}' is not available to role '{role}'."}
+        elif not _is_tool_allowed(name):
+            result = {"error": f"Tool '{name}' is blocked by server policy."}
         elif not _dispatcher:
             result = {"error": "Dispatcher not initialised."}
         else:
-            result = await _dispatcher.call_tool(name, args)
+            try:
+                result = await _dispatcher.call_tool(name, args)
+            except Exception as exc:
+                logger.exception("[request %s] tool %s raised", request_id, name)
+                result = {"error": f"Tool execution failed: {exc}"}
 
         tool_elapsed_ms = int((time.time() - tool_start) * 1000)
         logger.info("[request %s] tool_end %s ms=%d", request_id, name, tool_elapsed_ms)
+        is_error = isinstance(result, dict) and "error" in result
         _audit_log(
             {
                 "event": "tool_call",
                 "request_id": request_id,
                 "name": name,
+                "args": args,
                 "user": user,
                 "role": role,
                 "ms": tool_elapsed_ms,
-                "error": isinstance(result, dict) and "error" in result,
+                "error": is_error,
             }
         )
-        if isinstance(result, dict) and "error" in result:
+        if is_error:
             with _metrics_lock:
                 _metrics["tool_errors_total"] += 1
 
@@ -775,13 +876,14 @@ async def _agentic_loop(
             "role": "tool",
             "tool_call_id": tc.id,
             "name": name,
-            "content": json.dumps(result),
+            "content": _compact_tool_result(result),
         }
         return end_event, tool_msg
 
     for _turn in range(MAX_TOOL_TURNS):
         try:
-            response = llm_adapter.chat(
+            response = await asyncio.to_thread(
+                llm_adapter.chat,
                 model=model,
                 messages=messages,
                 tools=tools,
@@ -821,76 +923,57 @@ async def _agentic_loop(
     yield {"type": "reply", "content": "Reached maximum reasoning depth. Please rephrase your question."}
 
 
-async def _run_chat(message: str, user: str, role: str) -> dict:
-    request_id = str(uuid.uuid4())
-    start_time = time.time()
-    logger.info("[request %s] /chat start user=%s role=%s", request_id, user, role)
-    _audit_log({"event": "chat_start", "request_id": request_id, "user": user, "role": role})
+def _llm_model(llm_settings: dict[str, str]) -> str:
+    provider = llm_settings["provider"]
+    if provider == "local":
+        return llm_settings["local_model"]
+    if provider == "anthropic":
+        return llm_settings["anthropic_model"]
+    return llm_settings["openai_model"]
 
-    if _is_config_request(message):
-        return {
-            "request_id": request_id,
-            "reply": (
-                "NetCopilot is in read-only mode and cannot provide configuration commands. "
-                "If you want, I can open a change ticket instead."
-            ),
-        }
 
+def _chat_precheck(message: str, check_config: bool) -> Optional[dict]:
+    """Return an immediate reply/error event if the request can't go to the LLM."""
+    if check_config and _is_config_request(message):
+        return {"type": "reply", "content": _READ_ONLY_REPLY}
     llm_settings = _get_llm_settings()
     provider = llm_settings["provider"]
     if provider == "openai" and not llm_settings["openai_api_key"]:
-        return {"request_id": request_id, "reply": "OPENAI_API_KEY is missing."}
+        return {"type": "error", "text": "OPENAI_API_KEY is missing."}
     if provider == "anthropic" and not llm_settings["anthropic_api_key"]:
-        return {"request_id": request_id, "reply": "ANTHROPIC_API_KEY is missing."}
+        return {"type": "error", "text": "ANTHROPIC_API_KEY is missing."}
     if provider == "local" and not llm_settings["local_base_url"]:
-        return {"request_id": request_id, "reply": "LOCAL_LLM_BASE_URL is missing."}
+        return {"type": "error", "text": "LOCAL_LLM_BASE_URL is missing."}
+    return None
 
-    with _metrics_lock:
-        _metrics["requests_total"] += 1
 
+def _build_chat_messages(message: str, user: str, role: str) -> tuple[list, list]:
+    """Return (messages, tools) for a chat turn: system prompt + memory + user message."""
     with _memory_lock:
         history = _load_memory(user)
-
-    # Role-filtered tool list from MCP servers
     tools = _dispatcher.get_all_tools(role) if _dispatcher else []
-
-    playbook_summary = format_playbook_summary()
-    device_inventory = _build_device_inventory_summary()
-    system_prompt = build_system_prompt(playbook_summary, device_inventory)
+    system_prompt = build_system_prompt(format_playbook_summary(), _build_device_inventory_summary())
     messages = [
         {"role": "system", "content": system_prompt},
         *history,
         {"role": "user", "content": message},
     ]
+    return messages, tools
 
-    if provider == "local":
-        model = llm_settings["local_model"]
-    elif provider == "anthropic":
-        model = llm_settings["anthropic_model"]
-    else:
-        model = llm_settings["openai_model"]
 
-    reply = ""
-    async for event in _agentic_loop(request_id, messages, tools, model, user, role):
-        if event["type"] == "reply":
-            reply = event["content"]
-        elif event["type"] == "error":
-            return {"request_id": request_id, "reply": event["text"]}
-
-    total_ms = int((time.time() - start_time) * 1000)
-    logger.info("[request %s] /chat end ms=%d", request_id, total_ms)
-
-    # Collect tool results so they're available in future turns for ticket creation, etc.
-    # Truncate each result to 800 chars to keep memory tokens bounded.
+def _remember_turn(user: str, message: str, reply: str, messages: list) -> None:
+    """
+    Save the turn to memory. Tool outputs are kept (truncated to 800 chars
+    each) so follow-ups such as ticket creation can cite the evidence.
+    """
     _TOOL_RESULT_MAX = 800
     tool_findings: list[str] = []
     for m in messages:
         if isinstance(m, dict) and m.get("role") == "tool":
-            name = m.get("name", "tool")
             content = m.get("content", "")
             if len(content) > _TOOL_RESULT_MAX:
                 content = content[:_TOOL_RESULT_MAX] + "…[truncated]"
-            tool_findings.append(f"[{name}]: {content}")
+            tool_findings.append(f"[{m.get('name', 'tool')}]: {content}")
 
     if tool_findings:
         enriched_reply = (
@@ -910,6 +993,41 @@ async def _run_chat(message: str, user: str, role: str) -> dict:
                 {"role": "assistant", "content": enriched_reply},
             ],
         )
+
+
+async def _run_chat(message: str, user: str, role: str, check_config: bool = True) -> dict:
+    """
+    Run one chat turn to completion.
+
+    check_config=False is for NetCopilot's own prompts (alert investigations,
+    ticket creation) whose text may quote alerts like "shutdown by admin".
+    """
+    request_id = str(uuid.uuid4())
+    start_time = time.time()
+    logger.info("[request %s] /chat start user=%s role=%s", request_id, user, role)
+    _audit_log({"event": "chat_start", "request_id": request_id, "user": user, "role": role})
+
+    early = _chat_precheck(message, check_config)
+    if early:
+        return {"request_id": request_id, "reply": early.get("content") or early.get("text", "")}
+
+    with _metrics_lock:
+        _metrics["requests_total"] += 1
+
+    model = _llm_model(_get_llm_settings())
+    messages, tools = _build_chat_messages(message, user, role)
+
+    reply = ""
+    async for event in _agentic_loop(request_id, messages, tools, model, user, role):
+        if event["type"] == "reply":
+            reply = event["content"]
+        elif event["type"] == "error":
+            return {"request_id": request_id, "reply": event["text"]}
+
+    total_ms = int((time.time() - start_time) * 1000)
+    logger.info("[request %s] /chat end ms=%d", request_id, total_ms)
+
+    _remember_turn(user, message, reply, messages)
     return {"request_id": request_id, "reply": reply}
 
 
@@ -960,7 +1078,7 @@ def _parse_ticket_command(text: str) -> Optional[dict]:
 async def chat(req: ChatRequest, request: Request):
     _enforce_rate_limit(request.client.host if request.client else "unknown")
     role = _get_role_from_request(request)
-    return await _run_chat(req.message, req.user, role)
+    return await _run_chat(req.message, _resolve_user(request, req.user), role)
 
 
 @app.post("/chat/stream")
@@ -975,80 +1093,52 @@ async def chat_stream(req: ChatRequest, request: Request):
     """
     _enforce_rate_limit(request.client.host if request.client else "unknown")
     role = _get_role_from_request(request)
-
-    llm_settings = _get_llm_settings()
-    provider = llm_settings["provider"]
-    if provider == "openai" and not llm_settings["openai_api_key"]:
-        async def _err():
-            yield f'data: {json.dumps({"type": "error", "text": "OPENAI_API_KEY is missing."})}\n\n'
-            yield f'data: {json.dumps({"type": "done"})}\n\n'
-        return StreamingResponse(_err(), media_type="text/event-stream")
-    if provider == "anthropic" and not llm_settings["anthropic_api_key"]:
-        async def _err():
-            yield f'data: {json.dumps({"type": "error", "text": "ANTHROPIC_API_KEY is missing."})}\n\n'
-            yield f'data: {json.dumps({"type": "done"})}\n\n'
-        return StreamingResponse(_err(), media_type="text/event-stream")
-
-    if provider == "local":
-        model = llm_settings["local_model"]
-    elif provider == "anthropic":
-        model = llm_settings["anthropic_model"]
-    else:
-        model = llm_settings["openai_model"]
+    user = _resolve_user(request, req.user)
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
     request_id = str(uuid.uuid4())
-    with _memory_lock:
-        history = _load_memory(req.user)
+    _audit_log({"event": "chat_start", "request_id": request_id, "user": user, "role": role})
 
-    tools = _dispatcher.get_all_tools(role) if _dispatcher else []
-    system_prompt = build_system_prompt(
-        format_playbook_summary(), _build_device_inventory_summary()
-    )
-    messages = [
-        {"role": "system", "content": system_prompt},
-        *history,
-        {"role": "user", "content": req.message},
-    ]
+    early = _chat_precheck(req.message, check_config=True)
+    if early:
+        async def _early():
+            yield f"data: {json.dumps(early)}\n\n"
+            yield f'data: {json.dumps({"type": "done"})}\n\n'
+        return StreamingResponse(_early(), media_type="text/event-stream", headers=headers)
+
+    with _metrics_lock:
+        _metrics["requests_total"] += 1
+
+    model = _llm_model(_get_llm_settings())
+    messages, tools = _build_chat_messages(req.message, user, role)
 
     async def event_generator():
         reply = ""
-        async for event in _agentic_loop(request_id, messages, tools, model, req.user, role):
+        async for event in _agentic_loop(request_id, messages, tools, model, user, role):
             if event["type"] == "reply":
                 reply = event["content"]
             yield f"data: {json.dumps(event)}\n\n"
         yield f'data: {json.dumps({"type": "done"})}\n\n'
         if reply:
-            _TOOL_RESULT_MAX = 800
-            tool_findings: list[str] = []
-            for m in messages:
-                if isinstance(m, dict) and m.get("role") == "tool":
-                    content = m.get("content", "")
-                    if len(content) > _TOOL_RESULT_MAX:
-                        content = content[:_TOOL_RESULT_MAX] + "…[truncated]"
-                    tool_findings.append(f"[{m.get('name', 'tool')}]: {content}")
-            if tool_findings:
-                enriched_reply = (
-                    "Investigation findings (tool outputs):\n"
-                    + "\n".join(tool_findings)
-                    + "\n\nAssistant summary: "
-                    + reply
-                )
-            else:
-                enriched_reply = reply
-            with _memory_lock:
-                _save_memory(
-                    req.user,
-                    [
-                        {"role": "user", "content": req.message},
-                        {"role": "assistant", "content": enriched_reply},
-                    ],
-                )
+            _remember_turn(user, req.message, reply, messages)
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
+
+
+class ChatResetRequest(BaseModel):
+    user: str = "unknown"
+
+
+@app.post("/chat/reset")
+async def chat_reset(req: ChatResetRequest, request: Request):
+    """Forget this user's conversation history (the UI's "New chat" button)."""
+    _enforce_rate_limit(request.client.host if request.client else "unknown")
+    _get_role_from_request(request)
+    user = _resolve_user(request, req.user)
+    with _memory_lock:
+        removed = _clear_memory(user)
+    _audit_log({"event": "chat_reset", "user": user, "messages_removed": removed})
+    return {"status": "ok", "messages_removed": removed}
 
 
 @app.post("/alerts/ingest")
@@ -1061,20 +1151,11 @@ async def ingest_alert(req: AlertIngestRequest, request: Request):
     channel = req.channel or SLACK_ALERT_CHANNEL or "default"
     _save_alert(channel, req.source, req.model_dump())
 
-    details = " ".join(
-        filter(
-            None,
-            [
-                f"device={req.device}" if req.device else "",
-                f"interface={req.interface}" if req.interface else "",
-                f"severity={req.severity}" if req.severity else "",
-            ],
-        )
-    ).strip()
     slack_error = None
     if channel != "default":
         adapter = get_slack_adapter()
-        slack_error = adapter.send_alert_with_button(
+        slack_error = await asyncio.to_thread(
+            adapter.send_alert_with_button,
             channel=channel,
             alert_text=req.text,
             device=req.device or "",
@@ -1099,7 +1180,7 @@ async def teams_webhook(req: TeamsWebhookRequest):
 
 
 @app.post("/slack/command")
-async def slack_command(request: Request):
+async def slack_command(request: Request, background_tasks: BackgroundTasks):
     _enforce_rate_limit("slack")
     raw_body = await request.body()
     timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
@@ -1153,18 +1234,18 @@ async def slack_command(request: Request):
             investigate_text = _format_alert_context(alert) if alert else ""
 
     if response_url:
-        # Background thread for async Slack response
-        def _respond_async() -> None:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        # Slack needs an ack within 3s — do the work after responding, on this
+        # event loop (device pools, locks and MCP sessions are bound to it).
+        async def _respond() -> None:
             reply_text = "An error occurred."
             try:
                 if investigate_text is not None:
                     if not investigate_text.strip():
                         reply_text = "No recent alert found for this channel."
                     else:
-                        result = loop.run_until_complete(
-                            _run_chat(f"Investigate alert: {investigate_text}", user_name, SLACK_ROLE)
+                        result = await _run_chat(
+                            f"Investigate alert: {investigate_text}", user_name, SLACK_ROLE,
+                            check_config=False,
                         )
                         reply_text = result["reply"]
                         channel_key = channel_id or channel_name or "default"
@@ -1189,28 +1270,23 @@ async def slack_command(request: Request):
                             f"description={ticket_payload.get('description', '')}, "
                             f"priority={ticket_payload.get('priority', 'Medium')}."
                         )
-                    ticket_result = loop.run_until_complete(
-                        _run_chat(ticket_prompt, user_name, SLACK_ROLE)
-                    )
+                    ticket_result = await _run_chat(ticket_prompt, user_name, SLACK_ROLE, check_config=False)
                     reply_text = ticket_result.get("reply", "Ticket creation failed.")
                 else:
-                    result = loop.run_until_complete(_run_chat(text, user_name, SLACK_ROLE))
+                    result = await _run_chat(text, user_name, SLACK_ROLE)
                     reply_text = result["reply"]
             except Exception:
                 logger.exception("Slack async response failed.")
-            finally:
-                loop.close()
             try:
-                import httpx
-                with httpx.Client(timeout=10) as client:
-                    client.post(
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.post(
                         response_url,
                         json={"response_type": "in_channel", "text": reply_text},
                     )
             except Exception:
                 logger.exception("Slack response_url post failed.")
 
-        threading.Thread(target=_respond_async, daemon=True).start()
+        background_tasks.add_task(_respond)
         ack = (
             "Investigating alert..."
             if investigate_text is not None
@@ -1222,7 +1298,9 @@ async def slack_command(request: Request):
     if investigate_text is not None:
         if not investigate_text.strip():
             return {"response_type": "ephemeral", "text": "No recent alert found for this channel."}
-        result = await _run_chat(f"Investigate alert: {investigate_text}", user_name, SLACK_ROLE)
+        result = await _run_chat(
+            f"Investigate alert: {investigate_text}", user_name, SLACK_ROLE, check_config=False
+        )
         return {"response_type": "in_channel", "text": result["reply"]}
 
     if ticket_payload and _dispatcher:
@@ -1266,6 +1344,8 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
     signature = request.headers.get("X-Slack-Signature", "")
     timestamp  = request.headers.get("X-Slack-Request-Timestamp", "")
     if SLACK_SIGNING_SECRET:
+        if not timestamp.isdigit() or abs(int(time.time()) - int(timestamp)) > 300:
+            raise HTTPException(status_code=403, detail="Slack request expired.")
         try:
             digest = hmac.new(
                 SLACK_SIGNING_SECRET.encode("utf-8"),
@@ -1326,7 +1406,7 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                     f"cisco_get_interface_status, cisco_get_interface_counters for Cisco devices. "
                     f"Alert details: {context}"
                 )
-                result = await _run_chat(inv_prompt, user_name, SLACK_ROLE)
+                result = await _run_chat(inv_prompt, user_name, SLACK_ROLE, check_config=False)
                 reply_text = result["reply"]
                 _save_alert(channel, "analysis", {"analysis": reply_text})
 
@@ -1334,7 +1414,8 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                 if response_url:
                     try:
                         adapter = get_slack_adapter()
-                        adapter.post_investigation_result(
+                        await asyncio.to_thread(
+                            adapter.post_investigation_result,
                             response_url=response_url,
                             findings=reply_text,
                             device=device,
@@ -1382,7 +1463,7 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                     inv_result = await _run_chat(
                         f"Investigate this alert. Call vendor device tools DIRECTLY — "
                         f"do NOT use run_playbook. Alert details: {context}",
-                        user_name, SLACK_ROLE,
+                        user_name, SLACK_ROLE, check_config=False,
                     )
                     _save_alert(channel, "analysis", {"analysis": inv_result["reply"]})
                     ticket_prompt = (
@@ -1397,7 +1478,7 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                         f"Fill the description with all investigation findings, evidence, severity, and next steps."
                     )
 
-                result = await _run_chat(ticket_prompt, user_name, SLACK_ROLE)
+                result = await _run_chat(ticket_prompt, user_name, SLACK_ROLE, check_config=False)
                 reply_text = result.get("reply", "Ticket creation failed.")
         except Exception:
             logger.exception("Slack action handler failed.")
@@ -1457,13 +1538,8 @@ async def health_llm():
     if not llm_adapter:
         return {"status": "degraded", "error": "LLM not configured"}
     provider = llm_settings["provider"]
-    if provider == "local":
-        model = llm_settings["local_model"]
-    elif provider == "anthropic":
-        model = llm_settings["anthropic_model"]
-    else:
-        model = llm_settings["openai_model"]
-    result = llm_adapter.health(model)
+    model = _llm_model(llm_settings)
+    result = await asyncio.to_thread(llm_adapter.health, model)
     result["provider"] = provider
     return result
 
@@ -1555,9 +1631,8 @@ async def auth_callback(request: Request):
 @app.get("/auth/logout")
 async def auth_logout(request: Request):
     request.session.clear()
-    return RedirectResponse(
-        url=f"https://{AUTH0_DOMAIN}/v2/logout?returnTo={AUTH0_LOGOUT_URL}&client_id={AUTH0_CLIENT_ID}"
-    )
+    query = urlencode({"returnTo": AUTH0_LOGOUT_URL, "client_id": AUTH0_CLIENT_ID})
+    return RedirectResponse(url=f"https://{AUTH0_DOMAIN}/v2/logout?{query}")
 
 
 # ---------------------------------------------------------------------------
@@ -1629,7 +1704,7 @@ async def reload_inventory(request: Request):
     role = _get_role_from_request(request)
     if role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required.")
-    counts = reload_inventory_devices()
+    counts = await asyncio.to_thread(reload_inventory_devices)
     _audit_log({"event": "admin_inventory_reload", "counts": counts})
     return {"status": "ok", "counts": counts}
 
@@ -1639,22 +1714,11 @@ async def admin_inventory(request: Request):
     role = _get_role_from_request(request)
     if role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required.")
-    registry_path = get_setting(
-        "DEVICE_REGISTRY_PATH",
-        os.path.join(os.path.dirname(__file__), "devices.yaml"),
-    )
-    devices: dict[str, dict] = {"cisco_devices": {}, "juniper_devices": {}, "nokia_devices": {}}
-    if os.path.exists(registry_path):
-        with open(registry_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
-        for key in devices:
-            devices[key] = dict(raw.get(key, {}))
-    return {
-        "counts": {k.replace("_devices", ""): len(v) for k, v in devices.items()},
-        "cisco": [{"name": k, "target": v} for k, v in sorted(devices.get("cisco_devices", {}).items())],
-        "juniper": [{"name": k, "target": v} for k, v in sorted(devices.get("juniper_devices", {}).items())],
-        "nokia": [{"name": k, "target": v} for k, v in sorted(devices.get("nokia_devices", {}).items())],
-    }
+    devices = list_devices_detailed()
+    counts: dict[str, int] = {}
+    for device in devices:
+        counts[device["vendor"]] = counts.get(device["vendor"], 0) + 1
+    return {"counts": counts, "devices": devices, "registry_path": registry_path()}
 
 
 @app.post("/webhooks/nautobot/inventory")
@@ -1663,7 +1727,7 @@ async def nautobot_inventory_webhook(request: Request):
     if not expected:
         raise HTTPException(status_code=503, detail="INVENTORY_WEBHOOK_TOKEN not configured.")
     provided = (request.headers.get("X-Webhook-Token", "") or "").strip()
-    if not provided or provided != expected:
+    if not provided or not hmac.compare_digest(provided, expected):
         raise HTTPException(status_code=403, detail="Invalid webhook token.")
 
     debounce = get_setting_int("INVENTORY_WEBHOOK_DEBOUNCE_SECONDS", 5)
@@ -1680,7 +1744,7 @@ async def nautobot_inventory_webhook(request: Request):
     except Exception:
         pass
 
-    counts = reload_inventory_devices()
+    counts = await asyncio.to_thread(reload_inventory_devices)
     _audit_log(
         {
             "event": "inventory_webhook_reload",
@@ -1694,76 +1758,105 @@ async def nautobot_inventory_webhook(request: Request):
 
 @app.post("/admin/inventory/import-csv")
 async def import_inventory_csv(request: Request, file: UploadFile):
+    """
+    Merge devices from a CSV into devices.yaml (the `devices:` section).
+
+    Columns: device|name|hostname, vendor|platform, ip|host|address, and
+    optionally port, platform, site. Existing devices not in the CSV are kept.
+    """
     role = _get_role_from_request(request)
     if role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required.")
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Please upload a CSV file.")
 
-    registry_path = get_setting(
-        "DEVICE_REGISTRY_PATH",
-        os.path.join(os.path.dirname(__file__), "devices.yaml"),
-    )
-    devices: dict[str, dict] = {"cisco_devices": {}, "juniper_devices": {}, "nokia_devices": {}}
-    if os.path.exists(registry_path):
-        with open(registry_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
-        for key in devices:
-            devices[key] = dict(raw.get(key, {}))
-
     content = await file.read()
-    rows = list(csv.DictReader(content.decode("utf-8").splitlines()))
+    try:
+        rows = list(csv.DictReader(content.decode("utf-8-sig").splitlines()))
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded.")
     if not rows:
         raise HTTPException(status_code=400, detail="CSV file is empty.")
+
+    path = registry_path()
+    raw: dict = {}
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=500, detail=f"{path} is not a YAML mapping; refusing to overwrite it.")
+    devices_section = raw.get("devices") or {}
+    if not isinstance(devices_section, dict):
+        raise HTTPException(status_code=500, detail=f"'devices' in {path} is not a mapping.")
+
+    legacy_names = {
+        str(name)
+        for key in ("cisco_devices", "juniper_devices", "nokia_devices", "aruba_devices")
+        for name in (raw.get(key) or {})
+    }
 
     added = updated = skipped = 0
     errors: list[str] = []
 
-    def _normalize_vendor(v: str) -> str:
-        c = v.strip().lower()
-        if c in {"cisco", "iosxr", "ios-xr"}:
-            return "cisco_devices"
-        if c in {"juniper", "junos"}:
-            return "juniper_devices"
-        if c in {"nokia", "sros", "sr-os", "sr os"}:
-            return "nokia_devices"
-        return ""
-
     _SAFE_DEVICE_NAME = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
     _SAFE_HOST = re.compile(r"^[a-zA-Z0-9._:-]{1,255}$")
 
-    for row in rows:
-        name = (row.get("device") or row.get("name") or row.get("hostname") or "").strip()
-        vendor = (row.get("vendor") or row.get("platform") or "").strip()
-        host = (row.get("ip") or row.get("host") or row.get("address") or "").strip()
-        port = (row.get("port") or "").strip()
-        if not name or not vendor or not host:
+    for line_no, row in enumerate(rows, start=2):
+        row = {str(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+        name = row.get("device") or row.get("name") or row.get("hostname") or ""
+        vendor_raw = row.get("vendor") or row.get("platform") or ""
+        host = row.get("ip") or row.get("host") or row.get("address") or ""
+        port = row.get("port") or ""
+        if not name or not vendor_raw or not host:
             skipped += 1
-            errors.append(f"Missing required fields: {row}")
+            errors.append(f"Line {line_no}: missing device, vendor or ip/host.")
             continue
         if not _SAFE_DEVICE_NAME.match(name):
             skipped += 1
-            errors.append(f"Invalid device name '{name}' — only alphanumeric, dots, hyphens allowed.")
+            errors.append(f"Line {line_no}: invalid device name '{name}' — only alphanumeric, dots, hyphens allowed.")
             continue
+        if "/" in host:
+            host = host.split("/", 1)[0]  # NetBox-style 10.0.0.1/32
         if not _SAFE_HOST.match(host):
             skipped += 1
-            errors.append(f"Invalid host value '{host}' for '{name}'.")
+            errors.append(f"Line {line_no}: invalid host value '{host}' for '{name}'.")
             continue
-        registry_key = _normalize_vendor(vendor)
-        if not registry_key:
+        if port and not (port.isdigit() and 0 < int(port) < 65536):
             skipped += 1
-            errors.append(f"Unsupported vendor '{vendor}' for '{name}'")
+            errors.append(f"Line {line_no}: invalid port '{port}' for '{name}'.")
             continue
-        address = f"{host}:{port}" if port else host
-        if name in devices[registry_key]:
+        vendor = normalize_vendor(vendor_raw)
+        if not vendor:
+            skipped += 1
+            errors.append(f"Line {line_no}: unsupported vendor '{vendor_raw}' for '{name}'.")
+            continue
+
+        entry: dict[str, Any] = {"host": host, "vendor": vendor}
+        if port:
+            entry["port"] = int(port)
+        platform = row.get("platform") if row.get("vendor") else ""
+        if platform:
+            entry["platform"] = platform
+        if row.get("site"):
+            entry["site"] = row["site"]
+
+        if name in devices_section or name in legacy_names:
             updated += 1
         else:
             added += 1
-        devices[registry_key][name] = address
+        devices_section[name] = entry
 
-    with open(registry_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(devices, f, sort_keys=False)
-    counts = reload_inventory_devices()
+    raw["devices"] = devices_section
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(raw, f, sort_keys=False)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot write {path} ({exc.strerror}). In Docker/Kubernetes devices.yaml is "
+                   "usually mounted read-only — update the mounted file or ConfigMap instead.",
+        )
+    counts = await asyncio.to_thread(reload_inventory_devices)
 
     _audit_log(
         {
@@ -1817,3 +1910,31 @@ async def delete_playbook_endpoint(playbook_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Playbook not found.")
     _audit_log({"event": "playbook_delete", "id": playbook_id})
     return {"status": "ok", "id": playbook_id}
+
+
+@app.post("/admin/playbooks/test-step")
+async def test_playbook_step(request: Request):
+    """Run a single playbook step with the given inputs (Admin UI "Test step")."""
+    role = _get_role_from_request(request)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    payload = await request.json()
+    step = payload.get("step") if isinstance(payload, dict) else None
+    inputs = payload.get("inputs") if isinstance(payload, dict) else None
+    if not isinstance(step, dict) or not isinstance(inputs or {}, dict):
+        raise HTTPException(status_code=400, detail="Expected JSON body with 'step' and 'inputs' objects.")
+    if not _dispatcher:
+        raise HTTPException(status_code=503, detail="Dispatcher not initialised.")
+
+    from adapters.devices.registry import get_vendor
+    from playbooks.runner import plan_step
+
+    params = {k: v for k, v in (inputs or {}).items() if v not in (None, "")}
+    device_vendor = get_vendor(str(params.get("device", ""))) or ""
+    tool_name, args, skip_reason = plan_step(step, params, device_vendor)
+    if skip_reason:
+        raise HTTPException(status_code=400, detail=f"Step would be skipped: {skip_reason}")
+
+    result = await _dispatcher.call_tool_unprefixed(tool_name, args)
+    _audit_log({"event": "playbook_test_step", "tool": tool_name, "args": args})
+    return {"status": "ok", "tool": tool_name, "args": args, "result": result}
