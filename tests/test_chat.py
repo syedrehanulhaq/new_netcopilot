@@ -152,3 +152,14 @@ def test_stdlib_secrets_module_is_not_shadowed():
 
     assert callable(secrets.choice) and callable(secrets.randbelow)
     assert not secrets.__file__.startswith(ROOT)
+
+
+def test_anthropic_workspace_header_is_sent_when_configured(monkeypatch):
+    from adapters.llm.registry import get_llm_adapter
+
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("ANTHROPIC_WORKSPACE_ID", "wrkspc_abc")
+    assert get_llm_adapter().client.default_headers["anthropic-workspace-id"] == "wrkspc_abc"
+    monkeypatch.delenv("ANTHROPIC_WORKSPACE_ID")
+    assert "anthropic-workspace-id" not in get_llm_adapter().client.default_headers

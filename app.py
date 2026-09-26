@@ -236,6 +236,7 @@ _SETTINGS_SCHEMA = [
     {"key": "OPENAI_MODEL", "label": "OpenAI model", "category": "LLM"},
     {"key": "ANTHROPIC_API_KEY", "label": "Anthropic API key", "category": "LLM", "secret": True},
     {"key": "ANTHROPIC_MODEL", "label": "Anthropic model", "category": "LLM"},
+    {"key": "ANTHROPIC_WORKSPACE_ID", "label": "Anthropic workspace ID (only for keys not scoped to a workspace)", "category": "LLM"},
     {"key": "LOCAL_LLM_BASE_URL", "label": "Local LLM base URL", "category": "LLM"},
     {"key": "LOCAL_LLM_API_KEY", "label": "Local LLM API key", "category": "LLM", "secret": True},
     {"key": "LOCAL_LLM_MODEL", "label": "Local LLM model", "category": "LLM"},

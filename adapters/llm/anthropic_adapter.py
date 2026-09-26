@@ -245,8 +245,10 @@ def _build_response(anthropic_response) -> _Response:
 class AnthropicAdapter:
     name = "anthropic"
 
-    def __init__(self, api_key: str):
-        self.client = anthropic.Anthropic(api_key=api_key)
+    def __init__(self, api_key: str, workspace_id: str = ""):
+        # Keys not scoped to a workspace must name one on every request.
+        headers = {"anthropic-workspace-id": workspace_id} if workspace_id else None
+        self.client = anthropic.Anthropic(api_key=api_key, default_headers=headers)
 
     def chat(
         self,
