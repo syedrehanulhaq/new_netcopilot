@@ -242,13 +242,35 @@ def _build_response(anthropic_response) -> _Response:
 # Adapter
 # ---------------------------------------------------------------------------
 
+# Models that support the server-side refusal fallback (beta). On a policy decline
+# (e.g. a cyber-classifier false positive on network-security wording) the API
+# retries the same request on Anthropic's recommended model instead of failing.
+_FALLBACK_MODELS = ("claude-opus-5", "claude-fable-5")
+_FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
+
 class AnthropicAdapter:
     name = "anthropic"
 
-    def __init__(self, api_key: str, workspace_id: str = ""):
+    def __init__(
+        self,
+        api_key: str,
+        workspace_id: str = "",
+        effort: str = "",
+        max_tokens: int = 16000,
+        fallback: str = "auto",
+    ):
         # Keys not scoped to a workspace must name one on every request.
         headers = {"anthropic-workspace-id": workspace_id} if workspace_id else None
         self.client = anthropic.Anthropic(api_key=api_key, default_headers=headers)
+        self.effort = effort.strip().lower()          # low | medium | high | xhigh | max; "" = model default
+        self.max_tokens = max_tokens                  # thinking counts toward this on current models
+        self.fallback = (fallback or "auto").strip().lower()  # auto | on | off
+
+    def _use_fallback(self, model: str) -> bool:
+        if self.fallback == "off":
+            return False
+        return self.fallback == "on" or model.startswith(_FALLBACK_MODELS)
 
     def chat(
         self,
@@ -264,8 +286,10 @@ class AnthropicAdapter:
         kwargs: Dict[str, Any] = {
             "model": model,
             "messages": anthropic_messages,
-            "max_tokens": max_tokens or 4096,
+            "max_tokens": max_tokens or self.max_tokens,
         }
+        if self.effort:
+            kwargs["output_config"] = {"effort": self.effort}
         if system_prompt:
             kwargs["system"] = system_prompt
         if tools:
@@ -273,7 +297,10 @@ class AnthropicAdapter:
             if tool_choice == "auto" or tool_choice is None:
                 kwargs["tool_choice"] = {"type": "auto"}
 
-        response = self.client.messages.create(**kwargs)
+        if self._use_fallback(model):
+            response = self.client.beta.messages.create(betas=[_FALLBACK_BETA], fallbacks="default", **kwargs)
+        else:
+            response = self.client.messages.create(**kwargs)
         return _build_response(response)
 
     def health(self, model: str) -> Dict[str, Any]:

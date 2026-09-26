@@ -24,6 +24,10 @@ Jira tickets. An LLM decides which diagnostics to run and summarises the evidenc
 | NetCopilot → Prometheus / Loki | outbound HTTPS | read queries | |
 | NetCopilot → Slack / Teams | outbound HTTPS | answers, alert messages | |
 
+With Anthropic's Opus 5.x / Fable 5.x models, a request the model declines under its safety
+policy (e.g. a false positive on network-security wording) is re-run by the API on another
+Anthropic model — same provider and data path (`ANTHROPIC_FALLBACK=off` disables this).
+
 To keep all data inside your network or cloud tenancy, set `LLM_PROVIDER=local` and point
 `LOCAL_LLM_BASE_URL` at an internal OpenAI-compatible endpoint (e.g. LiteLLM in front of
 Amazon Bedrock or Azure OpenAI, see `docs/bedrock_litellm.md`).

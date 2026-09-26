@@ -54,7 +54,7 @@ SLACK_ALERT_CHANNEL = get_setting("SLACK_ALERT_CHANNEL", "")
 OPENAI_MODEL = get_setting("OPENAI_MODEL", "gpt-4.1-mini")
 
 ANTHROPIC_API_KEY = get_setting("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = get_setting("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+ANTHROPIC_MODEL = get_setting("ANTHROPIC_MODEL", "claude-opus-5-5")
 
 LLM_PROVIDER = get_setting("LLM_PROVIDER", "openai").lower()
 LOCAL_LLM_BASE_URL = get_setting("LOCAL_LLM_BASE_URL", "")

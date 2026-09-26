@@ -13,7 +13,17 @@ def get_llm_adapter() -> Optional[LLMAdapter]:
         api_key = get_setting("ANTHROPIC_API_KEY", "")
         if not api_key:
             return None
-        return AnthropicAdapter(api_key=api_key, workspace_id=get_setting("ANTHROPIC_WORKSPACE_ID", ""))
+        try:
+            max_tokens = int(get_setting("ANTHROPIC_MAX_TOKENS", "16000"))
+        except ValueError:
+            max_tokens = 16000
+        return AnthropicAdapter(
+            api_key=api_key,
+            workspace_id=get_setting("ANTHROPIC_WORKSPACE_ID", ""),
+            effort=get_setting("ANTHROPIC_EFFORT", ""),
+            max_tokens=max_tokens,
+            fallback=get_setting("ANTHROPIC_FALLBACK", "auto"),
+        )
 
     if provider == "local":
         local_base_url = get_setting("LOCAL_LLM_BASE_URL", "")
