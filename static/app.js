@@ -181,76 +181,215 @@ function chatUserId() {
   return anonymousId;
 }
 
-function renderToolLines(lines) {
-  const wrap = document.createElement("span");
-  wrap.style.opacity = "0.55";
-  wrap.style.fontSize = "0.85em";
-  lines.forEach((text, i) => {
-    if (i) wrap.appendChild(document.createElement("br"));
-    wrap.appendChild(document.createTextNode(text));
-  });
-  replyEl.replaceChildren(wrap);
+// ---------------------------------------------------------------------------
+// Safe Markdown: everything is HTML-escaped first; only our own tags are added.
+// ---------------------------------------------------------------------------
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function inlineMarkdown(escaped) {
+  return escaped
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*(?!\*)/g, "$1<em>$2</em>");
+}
+
+function renderMarkdown(source) {
+  const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  let i = 0;
+  const isTableRow = (l) => /^\s*\|.*\|\s*$/.test(l);
+  const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => inlineMarkdown(escapeHtml(c.trim())));
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) {
+      const code = [];
+      i += 1;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]);
+      i += 1;
+      out.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+      continue;
+    }
+    if (isTableRow(line) && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])) {
+      const head = cells(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && isTableRow(lines[i])) rows.push(cells(lines[i++]));
+      out.push(
+        `<table><thead><tr>${head.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>` +
+          rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("") +
+          "</tbody></table>"
+      );
+      continue;
+    }
+    const heading = line.match(/^(#{1,4})\s+(.*)$/);
+    if (heading) {
+      const level = Math.min(heading[1].length + 2, 6);
+      out.push(`<h${level}>${inlineMarkdown(escapeHtml(heading[2]))}</h${level}>`);
+      i += 1;
+      continue;
+    }
+    const listType = /^\s*[-*•]\s+/.test(line) ? "ul" : /^\s*\d+[.)]\s+/.test(line) ? "ol" : null;
+    if (listType) {
+      const items = [];
+      const marker = listType === "ul" ? /^\s*[-*•]\s+/ : /^\s*\d+[.)]\s+/;
+      while (i < lines.length && marker.test(lines[i])) {
+        items.push(`<li>${inlineMarkdown(escapeHtml(lines[i].replace(marker, "")))}</li>`);
+        i += 1;
+      }
+      out.push(`<${listType}>${items.join("")}</${listType}>`);
+      continue;
+    }
+    if (!line.trim()) {
+      i += 1;
+      continue;
+    }
+    const para = [];
+    while (
+      i < lines.length && lines[i].trim() && !/^\s*```/.test(lines[i]) && !/^#{1,4}\s/.test(lines[i]) &&
+      !/^\s*([-*•]|\d+[.)])\s+/.test(lines[i]) && !isTableRow(lines[i])
+    ) {
+      para.push(inlineMarkdown(escapeHtml(lines[i])));
+      i += 1;
+    }
+    out.push(`<p>${para.join("<br>")}</p>`);
+  }
+  return out.join("");
+}
+
+// ---------------------------------------------------------------------------
+// Conversation transcript
+// ---------------------------------------------------------------------------
+function clearTranscript(text) {
+  const empty = document.createElement("div");
+  empty.className = "transcript-empty";
+  empty.textContent = text;
+  replyEl.replaceChildren(empty);
+}
+
+function addBubble(role) {
+  replyEl.querySelector(".transcript-empty")?.remove();
+  const bubble = document.createElement("div");
+  bubble.className = `bubble ${role}`;
+  replyEl.appendChild(bubble);
+  return bubble;
 }
 
 async function sendMessage() {
   const message = messageEl.value.trim();
   const user = chatUserId();
-  if (!message) {
-    replyEl.textContent = "Please enter a message.";
-    return;
-  }
-  replyEl.innerHTML = '<span style="opacity:0.6">Thinking…</span>';
-  sendBtn.disabled = true;
+  if (!message || sendBtn.disabled) return;
 
+  const userBubble = addBubble("user");
+  userBubble.textContent = message;
+  messageEl.value = "";
+
+  const bubble = addBubble("assistant");
+  const steps = document.createElement("details");
+  steps.className = "steps";
+  steps.hidden = true;
+  const stepsSummary = document.createElement("summary");
+  const stepsList = document.createElement("ul");
+  steps.append(stepsSummary, stepsList);
+  const content = document.createElement("div");
+  content.className = "content thinking";
+  content.textContent = "Thinking…";
+  const footer = document.createElement("div");
+  footer.className = "bubble-footer";
+  bubble.append(steps, content, footer);
+  bubble.scrollIntoView({ block: "end" });
+
+  const started = performance.now();
+  const stepItems = [];
+  let toolCount = 0;
+  const updateSummary = () => {
+    const failed = stepItems.filter((li) => li.classList.contains("failed")).length;
+    stepsSummary.textContent = `Evidence: ${toolCount} tool call${toolCount === 1 ? "" : "s"}` +
+      (failed ? ` · ${failed} failed` : "");
+  };
+
+  sendBtn.disabled = true;
   try {
     const response = await apiFetch("/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message, user }),
     });
-
     if (!response.ok || !response.body) {
       const data = await response.json().catch(() => ({}));
-      replyEl.textContent = data.detail || "Request failed.";
+      content.classList.remove("thinking");
+      content.classList.add("error-text");
+      content.textContent = data.detail || "Request failed.";
       return;
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    const toolLines = [];
-
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const parts = buffer.split("\n\n");
-      buffer = parts.pop();          // keep incomplete chunk
-
+      buffer = parts.pop();
       for (const part of parts) {
         const line = part.startsWith("data: ") ? part.slice(6) : part;
-        if (!line || line === "[DONE]") continue;
+        if (!line) continue;
         let evt;
         try { evt = JSON.parse(line); } catch { continue; }
 
         if (evt.type === "tool_start") {
-          toolLines.push(`⚙ ${evt.name}…`);
-          renderToolLines(toolLines);
+          toolCount += 1;
+          steps.hidden = false;
+          const li = document.createElement("li");
+          li.dataset.tool = evt.name;
+          li.textContent = `⚙ ${evt.name}  ${JSON.stringify(evt.args || {})}`;
+          stepItems.push(li);
+          stepsList.appendChild(li);
+          content.textContent = `Running ${evt.name}…`;
+          updateSummary();
         } else if (evt.type === "tool_end") {
-          const idx = toolLines.findLastIndex(l => l.startsWith(`⚙ ${evt.name}`));
-          if (idx >= 0) toolLines[idx] = `✓ ${evt.name} (${evt.ms}ms)`;
-          renderToolLines(toolLines);
+          const li = stepItems.find((item) => item.dataset.tool === evt.name && !item.dataset.done);
+          if (li) {
+            li.dataset.done = "1";
+            li.textContent = li.textContent.replace(/^⚙/, evt.error ? "✕" : "✓") + `  (${evt.ms} ms)`;
+            if (evt.error) li.classList.add("failed");
+          }
+          updateSummary();
         } else if (evt.type === "reply") {
-          replyEl.textContent = evt.content;
+          content.classList.remove("thinking");
+          content.innerHTML = renderMarkdown(evt.content);
         } else if (evt.type === "error") {
-          replyEl.textContent = evt.text;
+          content.classList.remove("thinking");
+          content.classList.add("error-text");
+          content.textContent = evt.text;
+        } else if (evt.type === "done") {
+          const seconds = ((performance.now() - started) / 1000).toFixed(1);
+          footer.textContent = `${seconds}s`;
+          if (evt.investigation_id) {
+            const link = document.createElement("button");
+            link.className = "link-button";
+            link.textContent = "details";
+            link.addEventListener("click", () => openHistory(evt.investigation_id));
+            footer.append(" · ", link);
+          }
         }
       }
     }
   } catch (err) {
-    replyEl.textContent = `Error: ${err}`;
+    content.classList.remove("thinking");
+    content.classList.add("error-text");
+    content.textContent = `Error: ${err}`;
   } finally {
     sendBtn.disabled = false;
+    bubble.scrollIntoView({ block: "end" });
+    messageEl.focus();
   }
 }
 
@@ -263,19 +402,180 @@ newChatBtn.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user: chatUserId() }),
     });
-    replyEl.textContent = resp.ok
-      ? "Started a new chat — previous conversation forgotten."
-      : "Could not reset the conversation.";
+    clearTranscript(resp.ok ? "New conversation — NetCopilot has forgotten the previous one." : "Could not reset the conversation.");
   } catch (err) {
-    replyEl.textContent = `Error: ${err}`;
+    clearTranscript(`Error: ${err}`);
   } finally {
     newChatBtn.disabled = false;
+    messageEl.focus();
   }
 });
 messageEl.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+  // Enter sends; Shift+Enter inserts a new line.
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
     sendMessage();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Device shortcuts and example questions
+// ---------------------------------------------------------------------------
+function insertIntoMessage(text) {
+  const { selectionStart: a, selectionEnd: b, value } = messageEl;
+  const before = value.slice(0, a);
+  const spacer = before && !/\s$/.test(before) ? " " : "";
+  messageEl.value = before + spacer + text + value.slice(b);
+  messageEl.focus();
+}
+
+function chip(label, onClick, title) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "chip";
+  btn.textContent = label;
+  if (title) btn.title = title;
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+async function loadDeviceShortcuts() {
+  const devicesEl = document.getElementById("device-chips");
+  const examplesEl = document.getElementById("examples");
+  let devices = [];
+  try {
+    const resp = await apiFetch("/devices");
+    if (resp.ok) devices = (await resp.json()).devices || [];
+  } catch {}
+  devicesEl.replaceChildren(...devices.slice(0, 24).map((d) =>
+    chip(d.name, () => insertIntoMessage(d.name), `${d.vendor}${d.site ? " · " + d.site : ""}`)));
+  const first = devices[0] ? devices[0].name : "pe1";
+  const examples = [
+    `Is anything down on ${first}?`,
+    `Check BGP on ${first}`,
+    `What changed on ${first} recently?`,
+    `Check both ends of the link <interface> on ${first}`,
+  ];
+  examplesEl.replaceChildren(...examples.map((text) => chip(text, () => {
+    messageEl.value = text;
+    messageEl.focus();
+  })));
+}
+
+// ---------------------------------------------------------------------------
+// Investigation history
+// ---------------------------------------------------------------------------
+const historyOverlay = document.getElementById("history-overlay");
+const historyList = document.getElementById("history-list");
+const historyDetail = document.getElementById("history-detail");
+const historySearch = document.getElementById("history-search");
+
+function metaText(text) {
+  const span = document.createElement("span");
+  span.textContent = text;
+  return span;
+}
+
+function badge(text, cls) {
+  const b = document.createElement("span");
+  b.className = `badge ${cls || ""}`;
+  b.textContent = text;
+  return b;
+}
+
+async function loadHistoryList() {
+  historyList.textContent = "Loading…";
+  const params = new URLSearchParams({ user: chatUserId(), q: historySearch.value.trim(), limit: "100" });
+  try {
+    const data = await (await apiFetch(`/investigations?${params}`)).json();
+    const items = data.investigations || [];
+    if (!items.length) {
+      historyList.textContent = "No investigations yet.";
+      return;
+    }
+    historyList.replaceChildren(...items.map((item) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "history-row";
+      const q = document.createElement("div");
+      q.className = "history-question";
+      q.textContent = item.question;
+      const meta = document.createElement("div");
+      meta.className = "history-meta";
+      meta.append(metaText(new Date(item.created_at * 1000).toLocaleString()), badge(item.source));
+      if (item.severity) meta.append(badge(item.severity, `sev-${item.severity.toLowerCase()}`));
+      if (item.ticket) meta.append(badge("ticket", "sev-info"));
+      if (item.status === "error") meta.append(badge("error", "sev-critical"));
+      meta.append(metaText(`${item.tools.length} tool${item.tools.length === 1 ? "" : "s"}`));
+      row.append(q, meta);
+      row.addEventListener("click", () => showInvestigation(item.id));
+      return row;
+    }));
+  } catch (err) {
+    historyList.textContent = `Could not load history: ${err}`;
+  }
+}
+
+async function showInvestigation(id) {
+  historyDetail.textContent = "Loading…";
+  try {
+    const resp = await apiFetch(`/investigations/${encodeURIComponent(id)}?user=${encodeURIComponent(chatUserId())}`);
+    if (!resp.ok) {
+      historyDetail.textContent = "Investigation not found.";
+      return;
+    }
+    const inv = await resp.json();
+    const title = document.createElement("h3");
+    title.textContent = inv.question;
+    const meta = document.createElement("div");
+    meta.className = "history-meta";
+    meta.append(metaText(new Date(inv.created_at * 1000).toLocaleString()), badge(inv.source),
+      metaText(`${(inv.duration_ms / 1000).toFixed(1)}s`));
+    if (inv.usage && inv.usage.prompt_tokens) meta.append(metaText(`${inv.usage.prompt_tokens + inv.usage.completion_tokens} tokens`));
+    if (inv.ticket) meta.append(badge(inv.ticket, "sev-info"));
+    const answer = document.createElement("div");
+    answer.className = "content";
+    answer.innerHTML = renderMarkdown(inv.reply);
+    const evidence = document.createElement("div");
+    evidence.className = "history-evidence";
+    (inv.steps || []).forEach((step) => {
+      const d = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = `${step.error ? "✕" : "✓"} ${step.name} ${JSON.stringify(step.args || {})}`;
+      if (step.error) summary.classList.add("error-text");
+      const pre = document.createElement("pre");
+      pre.textContent = step.result;
+      d.append(summary, pre);
+      evidence.appendChild(d);
+    });
+    historyDetail.replaceChildren(title, meta, answer, evidence);
+  } catch (err) {
+    historyDetail.textContent = `Could not load investigation: ${err}`;
+  }
+}
+
+function openHistory(id) {
+  historyOverlay.hidden = false;
+  historyOverlay.classList.add("is-open");
+  loadHistoryList();
+  if (id) showInvestigation(id);
+  else historyDetail.textContent = "Select an investigation to see its answer and evidence.";
+}
+
+function closeHistory() {
+  historyOverlay.classList.remove("is-open");
+  historyOverlay.hidden = true;
+}
+
+document.getElementById("history-open").addEventListener("click", () => openHistory());
+document.getElementById("history-close").addEventListener("click", closeHistory);
+historyOverlay.addEventListener("click", (event) => {
+  if (event.target === historyOverlay) closeHistory();
+});
+let historySearchTimer;
+historySearch.addEventListener("input", () => {
+  clearTimeout(historySearchTimer);
+  historySearchTimer = setTimeout(loadHistoryList, 250);
 });
 
 function showSignIn() {
@@ -1396,4 +1696,4 @@ logoutBtn.addEventListener("click", async () => {
   window.location.href = "/auth/logout";
 });
 
-refreshUser();
+refreshUser().then(loadDeviceShortcuts);

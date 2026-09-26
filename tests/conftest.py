@@ -51,6 +51,19 @@ def write_devices(data: dict) -> None:
 
 
 @pytest.fixture(autouse=True)
+def no_real_devices(monkeypatch):
+    """Tests must never open SSH/NETCONF sessions to real addresses."""
+    import netmiko
+    from jnpr.junos import Device
+
+    def _blocked(*args, **kwargs):
+        raise RuntimeError("real device connections are disabled in tests")
+
+    monkeypatch.setattr(netmiko, "ConnectHandler", _blocked)
+    monkeypatch.setattr(Device, "open", _blocked)
+
+
+@pytest.fixture(autouse=True)
 def device_registry():
     """Fresh devices.yaml, registry and device pool for every test."""
     from adapters.devices import pool, registry
@@ -73,7 +86,6 @@ class FakeConn:
         self.kwargs = kwargs
 
     def send_command(self, command):
-        import threading
         import time
 
         with _fake_lock:

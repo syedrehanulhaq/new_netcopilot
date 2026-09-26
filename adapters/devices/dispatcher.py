@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 import re
 
-from adapters.devices.registry import correct_tool_vendor, get_vendor, list_devices
+from adapters.devices.registry import correct_tool_vendor, find_device, get_vendor
 from adapters.devices.safety import UnsafeInputError, validate_tool_args
 
 logger = logging.getLogger("netcopilot.dispatcher")
@@ -449,19 +449,7 @@ def _link_fields(result: dict | None) -> dict | None:
 
 def _match_inventory_device(name: str) -> str | None:
     """Map an LLDP system name (possibly an FQDN) to an inventory device name."""
-    wanted = name.strip().lower()
-    if not wanted:
-        return None
-    names = {d["name"].lower(): d["name"] for d in list_devices()}
-    if wanted in names:
-        return names[wanted]
-    short = wanted.split(".", 1)[0]
-    if short in names:
-        return names[short]
-    for lname, real in names.items():
-        if lname.split(".", 1)[0] == short:
-            return real
-    return None
+    return find_device(name)
 
 
 _IFACE_TOKEN = re.compile(r"\b([a-z]{2,4}-\d+/\d+/\d+(?:[.:]\d+)?|[A-Za-z]+(?:Ethernet)?\d+(?:/\d+){1,3}(?:\.\d+)?|\d+/\d+/\d+)\b")

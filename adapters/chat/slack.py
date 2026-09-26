@@ -18,8 +18,10 @@ class SlackAdapter:
 
     def __init__(self, token: str):
         self.token = token
+        self.last_response: dict[str, Any] = {}  # chat.postMessage result (channel id, ts)
 
     def _post(self, payload: dict) -> Optional[str]:
+        """Post a message; returns an error string, or None on success."""
         if not self.token:
             return "SLACK_BOT_TOKEN not configured."
         try:
@@ -32,9 +34,20 @@ class SlackAdapter:
             data = resp.json()
             if not data.get("ok"):
                 return data.get("error", "unknown_error")
+            self.last_response = data
             return None
         except Exception as exc:
             return str(exc)
+
+    def send_thread_reply(self, channel: str, thread_ts: str, text: str) -> Optional[str]:
+        """Reply in a message thread (e.g. automatic investigation under its alert)."""
+        display = text if len(text) <= _SECTION_TEXT_MAX else text[:_SECTION_TEXT_MAX] + "\n_…truncated_"
+        return self._post({
+            "channel": channel,
+            "thread_ts": thread_ts,
+            "text": text[:3000],
+            "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": display}}],
+        })
 
     def send_message(self, channel: str, text: str) -> Optional[str]:
         return self._post({"channel": channel, "text": text})

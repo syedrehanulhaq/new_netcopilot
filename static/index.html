@@ -41,17 +41,44 @@
           <h2>Ask NetCopilot</h2>
           <label>
             Message
-            <textarea id="message" placeholder="Check interface health on sandbox-iosxr-1 Gi0/0/0/0"></textarea>
+            <textarea id="message" placeholder="e.g. Why is BGP to 10.0.0.2 down on pe1?"></textarea>
           </label>
+          <div class="hint">Enter to send · Shift+Enter for a new line · read-only: NetCopilot never changes devices</div>
           <div class="chat-actions">
             <button id="send">Send</button>
             <button id="new-chat" title="Forget the conversation history for this chat">New chat</button>
+            <button id="history-open" class="secondary-btn" title="Past investigations and their evidence">History</button>
+          </div>
+          <div class="quick">
+            <div class="quick-label">Try</div>
+            <div id="examples" class="chips"></div>
+            <div class="quick-label">Devices</div>
+            <div id="device-chips" class="chips"></div>
           </div>
         </section>
 
         <section class="card">
-          <h2>Reply</h2>
-          <div id="reply" class="reply">Waiting for a message...</div>
+          <h2>Conversation</h2>
+          <div id="reply" class="reply transcript">
+            <div class="transcript-empty">Ask about a device, an alert, or what changed. Answers cite the evidence NetCopilot collected.</div>
+          </div>
+        </section>
+      </div>
+
+      <div id="history-overlay" class="settings-overlay" hidden>
+        <section class="card settings-panel history-panel">
+          <div class="settings-header">
+            <div>
+              <h2>Investigation history</h2>
+              <p class="tagline" style="margin-top: 4px">Every answer with the tools that ran and the (redacted) evidence they returned.</p>
+            </div>
+            <button id="history-close" class="settings-close">Close</button>
+          </div>
+          <input id="history-search" type="search" placeholder="Search questions and answers" />
+          <div class="history-shell">
+            <div id="history-list" class="history-list"></div>
+            <div id="history-detail" class="history-detail"></div>
+          </div>
         </section>
       </div>
 

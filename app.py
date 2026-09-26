@@ -47,6 +47,7 @@ from config import (
 )
 import audit
 import guardrails
+import history
 from redaction import redact_obj
 from adapters.devices.dispatcher import ToolDispatcher
 from adapters.devices.registry import (
@@ -143,6 +144,7 @@ async def lifespan(app: FastAPI):
             logger.warning("security posture [%s] %s: %s %s", check["status"], check["title"],
                            check["detail"], check["remediation"])
     audit.init_audit_db()
+    history.init_history_db()
     _init_memory_db()
     _init_alerts_db()
     # devices.yaml + NetBox/Nautobot (if configured) → device registry
@@ -297,6 +299,10 @@ _SETTINGS_SCHEMA = [
     {"key": "SYSLOG_TOKEN", "label": "Syslog API token", "category": "Syslog", "secret": True},
     {"key": "SYSLOG_QUERY_PARAM", "label": "Syslog query param", "category": "Syslog"},
     {"key": "ALERT_INGEST_TOKEN", "label": "Alert ingest token", "category": "Alerts", "secret": True},
+    {"key": "AUTO_INVESTIGATE", "label": "Investigate incoming alerts automatically (true/false)", "category": "Alerts"},
+    {"key": "AUTO_INVESTIGATE_ROLE", "label": "Role used by automatic investigations (default noc: read-only, no tickets)", "category": "Alerts"},
+    {"key": "AUTO_INVESTIGATE_MAX_PER_HOUR", "label": "Max automatic investigations per hour (LLM cost cap)", "category": "Alerts"},
+    {"key": "ALERT_DEDUPE_MINUTES", "label": "Skip re-investigating the same alert within (minutes)", "category": "Alerts"},
     {"key": "AUTH0_DOMAIN", "label": "Auth0 domain", "category": "Auth"},
     {"key": "AUTH0_CLIENT_ID", "label": "Auth0 client ID", "category": "Auth"},
     {"key": "AUTH0_CLIENT_SECRET", "label": "Auth0 client secret", "category": "Auth", "secret": True},
@@ -829,6 +835,15 @@ class AlertIngestRequest(BaseModel):
 _TOOL_RESULT_MAX_CHARS = 24_000
 
 
+def _alert_investigation_prompt(context: str) -> str:
+    return (
+        "Investigate this network alert. Confirm the current state with the device tools, "
+        "use check_link for interface alerts, check get_recent_changes for a related change, "
+        "then give: likely cause, the evidence (exact values), severity, and read-only next steps. "
+        f"Alert details: {context}"
+    )
+
+
 def _compact_tool_result(result: Any) -> str:
     """
     Serialize a tool result for the LLM, bounded in size.
@@ -929,7 +944,9 @@ async def _agentic_loop(
 
         tool_elapsed_ms = int((time.time() - tool_start) * 1000)
         logger.info("[request %s] tool_end %s ms=%d", request_id, name, tool_elapsed_ms)
-        is_error = isinstance(result, dict) and "error" in result
+        is_error = (isinstance(result, dict) and "error" in result) or (
+            isinstance(result, list) and len(result) == 1 and isinstance(result[0], dict) and "error" in result[0]
+        )
         _audit_log(
             {
                 "event": "tool_call",
@@ -947,7 +964,7 @@ async def _agentic_loop(
                 _metrics["tool_errors_total"] += 1
                 _metrics["tool_error_counts"][name] = _metrics["tool_error_counts"].get(name, 0) + 1
 
-        end_event = {"type": "tool_end", "name": name, "ms": tool_elapsed_ms}
+        end_event = {"type": "tool_end", "name": name, "ms": tool_elapsed_ms, "error": is_error}
         tool_msg = {
             "role": "tool",
             "tool_call_id": tc.id,
@@ -1059,8 +1076,9 @@ def _build_chat_messages(message: str, user: str, role: str) -> tuple[list, list
 
 
 def _finish_chat(request_id: str, user: str, role: str, started: float, usage: dict, messages: list,
-                 error: Optional[str] = None) -> None:
-    """Metrics + audit record for a completed chat turn (tokens, tools, duration)."""
+                 error: Optional[str] = None, question: str = "", reply: str = "",
+                 source: str = "api") -> str:
+    """Metrics, audit record and investigation history for a finished chat turn. Returns the history id."""
     elapsed = time.time() - started
     tools_used = [m.get("name") for m in messages if isinstance(m, dict) and m.get("role") == "tool"]
     with _metrics_lock:
@@ -1078,6 +1096,16 @@ def _finish_chat(request_id: str, user: str, role: str, started: float, usage: d
         "completion_tokens": usage.get("completion_tokens", 0),
         "error": error,
     })
+    usage_summary = {k: usage.get(k, 0) for k in ("llm_calls", "prompt_tokens", "completion_tokens")}
+    try:
+        return history.record(
+            user=user, role=role, source=source, question=question,
+            reply=error or reply, messages=messages, status="error" if error else "ok",
+            duration_ms=int(elapsed * 1000), usage=usage_summary,
+        )
+    except Exception:
+        logger.exception("[request %s] could not save investigation history", request_id)
+        return ""
 
 
 def _remember_turn(user: str, message: str, reply: str, messages: list) -> None:
@@ -1114,7 +1142,7 @@ def _remember_turn(user: str, message: str, reply: str, messages: list) -> None:
         )
 
 
-async def _run_chat(message: str, user: str, role: str, check_config: bool = True) -> dict:
+async def _run_chat(message: str, user: str, role: str, check_config: bool = True, source: str = "api") -> dict:
     """
     Run one chat turn to completion.
 
@@ -1144,15 +1172,17 @@ async def _run_chat(message: str, user: str, role: str, check_config: bool = Tru
         elif event["type"] == "reply":
             reply = event["content"]
         elif event["type"] == "error":
-            _finish_chat(request_id, user, role, start_time, usage, messages, error=event["text"])
-            return {"request_id": request_id, "reply": event["text"]}
+            inv_id = _finish_chat(request_id, user, role, start_time, usage, messages,
+                                  error=event["text"], question=message, source=source)
+            return {"request_id": request_id, "reply": event["text"], "investigation_id": inv_id}
 
     total_ms = int((time.time() - start_time) * 1000)
     logger.info("[request %s] /chat end ms=%d", request_id, total_ms)
 
-    _finish_chat(request_id, user, role, start_time, usage, messages)
+    inv_id = _finish_chat(request_id, user, role, start_time, usage, messages,
+                          question=message, reply=reply, source=source)
     _remember_turn(user, message, reply, messages)
-    return {"request_id": request_id, "reply": reply}
+    return {"request_id": request_id, "reply": reply, "investigation_id": inv_id}
 
 
 # ---------------------------------------------------------------------------
@@ -1250,12 +1280,46 @@ async def chat_stream(req: ChatRequest, request: Request):
             elif event["type"] == "error":
                 error = event["text"]
             yield f"data: {json.dumps(event)}\n\n"
-        yield f'data: {json.dumps({"type": "done"})}\n\n'
-        _finish_chat(request_id, user, role, started, usage, messages, error=error)
+        inv_id = _finish_chat(request_id, user, role, started, usage, messages, error=error,
+                              question=req.message, reply=reply, source="ui")
+        yield f'data: {json.dumps({"type": "done", "investigation_id": inv_id})}\n\n'
         if reply:
             _remember_turn(user, req.message, reply, messages)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
+
+
+@app.get("/devices")
+async def devices(request: Request):
+    """Inventory names/vendors for the UI's device shortcuts (no addresses)."""
+    _get_role_from_request(request)
+    from adapters.devices.registry import list_devices
+
+    return {"devices": sorted(list_devices(), key=lambda d: d["name"])}
+
+
+@app.get("/investigations")
+async def investigations(request: Request, q: str = "", limit: int = 50, user: str = "",
+                         scope: str = "mine", owner: str = ""):
+    """
+    Investigation history. Everyone sees their own; admins can pass scope=all
+    (optionally owner=<user>) to see everyone's.
+    """
+    role = _get_role_from_request(request)
+    me = _resolve_user(request, user)
+    who: Optional[str] = (owner or None) if (role == "admin" and scope == "all") else me
+    return {"investigations": history.list_investigations(who, query=q, limit=limit), "user": me}
+
+
+@app.get("/investigations/{inv_id}")
+async def investigation_detail(inv_id: str, request: Request, user: str = ""):
+    role = _get_role_from_request(request)
+    item = history.get_investigation(inv_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Investigation not found.")
+    if role != "admin" and item["user"] != _resolve_user(request, user):
+        raise HTTPException(status_code=404, detail="Investigation not found.")
+    return item
 
 
 class ChatResetRequest(BaseModel):
@@ -1290,26 +1354,153 @@ def _verify_alert_token(request: Request) -> None:
     raise HTTPException(status_code=503, detail="Alert ingest is not configured: set ALERT_INGEST_TOKEN.")
 
 
-@app.post("/alerts/ingest")
-async def ingest_alert(req: AlertIngestRequest, request: Request):
-    _enforce_rate_limit(request.client.host if request.client else "alert-ingest")
-    _verify_alert_token(request)
+# ---------------------------------------------------------------------------
+# Alert pipeline: store → Slack (with buttons) → optional automatic investigation
+# ---------------------------------------------------------------------------
 
-    channel = req.channel or get_setting("SLACK_ALERT_CHANNEL", "") or "default"
-    _save_alert(channel, req.source, req.model_dump())
+_auto_lock = threading.Lock()
+_auto_recent: dict[str, float] = {}   # alert fingerprint → last auto-investigation start
+_auto_starts: list[float] = []        # start times in the last hour (cost cap)
+_auto_semaphore = asyncio.Semaphore(2)
 
-    slack_error = None
+
+def _alert_fingerprint(alert: dict) -> str:
+    key = "|".join(str(alert.get(k) or "") for k in ("device", "interface", "text"))
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _auto_investigation_slot(fingerprint: str) -> Optional[str]:
+    """None if an automatic investigation may start; otherwise the reason it may not."""
+    now = time.time()
+    dedupe = get_setting_int("ALERT_DEDUPE_MINUTES", 30) * 60
+    cap = get_setting_int("AUTO_INVESTIGATE_MAX_PER_HOUR", 20)
+    with _auto_lock:
+        for fp in [fp for fp, ts in _auto_recent.items() if now - ts > dedupe]:
+            del _auto_recent[fp]
+        _auto_starts[:] = [ts for ts in _auto_starts if now - ts < 3600]
+        if fingerprint in _auto_recent:
+            return "duplicate: investigated recently"
+        if len(_auto_starts) >= cap:
+            return f"hourly limit of {cap} automatic investigations reached"
+        _auto_recent[fingerprint] = now
+        _auto_starts.append(now)
+    return None
+
+
+def _alert_context(alert: dict) -> str:
+    context = str(alert.get("text", ""))
+    for key in ("device", "interface", "severity"):
+        if alert.get(key):
+            context += f" {key}={alert[key]}"
+    return context
+
+
+async def _auto_investigate(alert: dict, channel: str, slack_thread: Optional[tuple[str, str]]) -> None:
+    """Investigate an alert with a read-only role and post the findings under the alert."""
+    async with _auto_semaphore:
+        if alert.get("device"):
+            from adapters.devices.pool import get_pool
+            get_pool().force_probe(str(alert["device"]))
+        result = await _run_chat(
+            _alert_investigation_prompt(_alert_context(alert)),
+            f"alert:{alert['fingerprint']}",
+            get_setting("AUTO_INVESTIGATE_ROLE", "noc"),
+            check_config=False,
+            source="alert",
+        )
+        reply = result.get("reply", "")
+        _save_alert(channel, "analysis", {"analysis": reply, "investigation_id": result.get("investigation_id")})
+        if slack_thread:
+            error = await asyncio.to_thread(
+                get_slack_adapter().send_thread_reply, slack_thread[0], slack_thread[1],
+                f"*NetCopilot automatic investigation*\n{reply}",
+            )
+            if error:
+                logger.warning("Posting automatic investigation to Slack failed: %s", error)
+
+
+async def _handle_alert(alert: dict) -> dict:
+    alert.setdefault("fingerprint", _alert_fingerprint(alert))
+    channel = alert.get("channel") or get_setting("SLACK_ALERT_CHANNEL", "") or "default"
+    _save_alert(channel, alert.get("source", "webhook"), alert)
+
+    slack_error, slack_thread = None, None
     if channel != "default":
         adapter = get_slack_adapter()
         slack_error = await asyncio.to_thread(
             adapter.send_alert_with_button,
             channel=channel,
-            alert_text=req.text,
-            device=req.device or "",
-            interface=req.interface or "",
-            severity=req.severity or "",
+            alert_text=str(alert.get("text", "")),
+            device=str(alert.get("device") or ""),
+            interface=str(alert.get("interface") or ""),
+            severity=str(alert.get("severity") or ""),
         )
-    return {"status": "ok", "channel": channel, "slack_error": slack_error}
+        if not slack_error and adapter.last_response.get("ts"):
+            slack_thread = (adapter.last_response.get("channel") or channel, adapter.last_response["ts"])
+
+    auto = "disabled"
+    if get_setting_bool("AUTO_INVESTIGATE", False):
+        reason = _auto_investigation_slot(alert["fingerprint"])
+        if reason:
+            auto = f"skipped ({reason})"
+        else:
+            auto = "started"
+            _keep_alive(asyncio.create_task(_auto_investigate(alert, channel, slack_thread)))
+    _audit_log({"event": "alert_received", "source": alert.get("source"), "device": alert.get("device"),
+                "fingerprint": alert["fingerprint"], "auto_investigation": auto})
+    return {"channel": channel, "slack_error": slack_error, "auto_investigation": auto,
+            "fingerprint": alert["fingerprint"]}
+
+
+@app.post("/alerts/ingest")
+async def ingest_alert(req: AlertIngestRequest, request: Request):
+    _enforce_rate_limit(request.client.host if request.client else "alert-ingest")
+    _verify_alert_token(request)
+    result = await _handle_alert(req.model_dump())
+    return {"status": "ok", **result}
+
+
+@app.post("/alerts/alertmanager")
+async def alertmanager_webhook(request: Request):
+    """
+    Prometheus Alertmanager webhook receiver (webhook_config). Device is taken from
+    labels device/hostname/host/instance and matched to the inventory by name or IP;
+    interface from interface/ifName/ifDescr/port. Resolved alerts are recorded only.
+    """
+    _enforce_rate_limit(request.client.host if request.client else "alert-ingest")
+    _verify_alert_token(request)
+    try:
+        payload = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid JSON.")
+    from adapters.devices.registry import find_device
+
+    results = []
+    for item in (payload.get("alerts") or [])[:50]:
+        labels = item.get("labels") or {}
+        annotations = item.get("annotations") or {}
+        raw_device = str(labels.get("device") or labels.get("hostname") or labels.get("host")
+                         or labels.get("instance") or "")
+        alert = {
+            "text": str(annotations.get("summary") or annotations.get("description")
+                        or labels.get("alertname") or "Alertmanager alert")[:500],
+            "source": "alertmanager",
+            "device": find_device(raw_device) or raw_device or None,
+            "interface": labels.get("interface") or labels.get("ifName") or labels.get("ifDescr")
+                         or labels.get("port") or None,
+            "severity": labels.get("severity"),
+            "channel": labels.get("slack_channel") or None,
+            "fingerprint": str(item.get("fingerprint") or "") or None,
+        }
+        alert = {k: v for k, v in alert.items() if v is not None}
+        status = item.get("status") or payload.get("status") or "firing"
+        if status == "resolved":
+            _save_alert(alert.get("channel") or get_setting("SLACK_ALERT_CHANNEL", "") or "default",
+                        "alertmanager-resolved", alert)
+            results.append({"fingerprint": alert.get("fingerprint"), "status": "resolved"})
+            continue
+        results.append({"status": "firing", **await _handle_alert(alert)})
+    return {"status": "ok", "processed": len(results), "alerts": results}
 
 
 # Background work that must outlive the request (kept referenced until done).
@@ -1413,7 +1604,7 @@ async def teams_webhook(request: Request):
     if not text:
         return {"type": "message", "text": "Ask me about a device, e.g. \"BGP status on pe1\"."}
 
-    task = asyncio.create_task(_run_chat(text, f"teams:{user}", get_setting("TEAMS_ROLE", "noc")))
+    task = asyncio.create_task(_run_chat(text, f"teams:{user}", get_setting("TEAMS_ROLE", "noc"), source="teams"))
     try:
         result = await asyncio.wait_for(asyncio.shield(task), timeout=4.0)
         return {"type": "message", "text": result["reply"]}
@@ -1529,10 +1720,10 @@ async def slack_command(request: Request, background_tasks: BackgroundTasks):
                             f"description={ticket_payload.get('description', '')}, "
                             f"priority={ticket_payload.get('priority', 'Medium')}."
                         )
-                    ticket_result = await _run_chat(ticket_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False)
+                    ticket_result = await _run_chat(ticket_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False, source="slack")
                     reply_text = ticket_result.get("reply", "Ticket creation failed.")
                 else:
-                    result = await _run_chat(text, user_name, get_setting("SLACK_ROLE", "noc"))
+                    result = await _run_chat(text, user_name, get_setting("SLACK_ROLE", "noc"), source="slack")
                     reply_text = result["reply"]
             except Exception:
                 logger.exception("Slack async response failed.")
@@ -1574,7 +1765,7 @@ async def slack_command(request: Request, background_tasks: BackgroundTasks):
             "text": f"Ticket created: {ticket_result.get('ticket_id')} {ticket_result.get('ticket_url', '')}".strip(),
         }
 
-    result = await _run_chat(text, user_name, get_setting("SLACK_ROLE", "noc"))
+    result = await _run_chat(text, user_name, get_setting("SLACK_ROLE", "noc"), source="slack")
     return {"response_type": "in_channel", "text": result["reply"]}
 
 
@@ -1644,13 +1835,8 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                     get_pool().force_probe(device)
                 # Explicitly bypass run_playbook so the LLM calls device tools directly
                 # and returns precise data (or a specific error if SSH fails)
-                inv_prompt = (
-                    f"Investigate this alert. Call vendor device tools DIRECTLY — "
-                    f"do NOT use run_playbook. Use tools such as cisco_get_interface_health, "
-                    f"cisco_get_interface_status, cisco_get_interface_counters for Cisco devices. "
-                    f"Alert details: {context}"
-                )
-                result = await _run_chat(inv_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False)
+                inv_prompt = _alert_investigation_prompt(context)
+                result = await _run_chat(inv_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False, source="slack")
                 reply_text = result["reply"]
                 _save_alert(channel, "analysis", {"analysis": reply_text})
 
@@ -1705,24 +1891,21 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                         from adapters.devices.pool import get_pool
                         get_pool().force_probe(device)
                     inv_result = await _run_chat(
-                        f"Investigate this alert. Call vendor device tools DIRECTLY — "
-                        f"do NOT use run_playbook. Alert details: {context}",
-                        user_name, get_setting("SLACK_ROLE", "noc"), check_config=False,
+                        _alert_investigation_prompt(context),
+                        user_name, get_setting("SLACK_ROLE", "noc"), check_config=False, source="slack",
                     )
-                    _save_alert(channel, "analysis", {"analysis": inv_result["reply"]})
-                    ticket_prompt = (
-                        f"Based on the investigation you just completed, create a Jira ticket. "
-                        f"Alert: {alert_text} (device={device}, interface={interface}, severity={severity}). "
-                        f"Use the investigation findings above for the description."
-                    )
-                else:
-                    ticket_prompt = (
-                        f"Create a Jira ticket for the investigation you just completed. "
-                        f"Alert: {alert_text} (device={device}, interface={interface}, severity={severity}). "
-                        f"Fill the description with all investigation findings, evidence, severity, and next steps."
-                    )
+                    analysis = inv_result["reply"]
+                    _save_alert(channel, "analysis", {"analysis": analysis})
+                # The findings are passed explicitly: the investigation may have been run by
+                # someone else or by the automatic investigator, so it is not in this user's memory.
+                ticket_prompt = (
+                    f"Create a Jira ticket for this alert. "
+                    f"Alert: {alert_text} (device={device}, interface={interface}, severity={severity}). "
+                    f"Fill the description with the investigation findings, evidence, severity and next steps.\n\n"
+                    f"Investigation findings:\n{(analysis or '')[:6000]}"
+                )
 
-                result = await _run_chat(ticket_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False)
+                result = await _run_chat(ticket_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False, source="slack")
                 reply_text = result.get("reply", "Ticket creation failed.")
         except Exception:
             logger.exception("Slack action handler failed.")

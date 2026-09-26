@@ -62,6 +62,20 @@ curl -sS http://127.0.0.1:9090/-/healthy
 
 ---
 
+# Access (new)
+
+Without Auth0 or `NETCOPILOT_API_KEYS`, only requests from this machine are served
+(the UI shows "Local access (admin)"). Behind Docker or a reverse proxy, configure
+API keys or Auth0 — see `README.md` and `docs/SECURITY.md`.
+
+# Replay evals (accuracy check before changing model or prompts)
+
+```
+.venv/bin/python -m evals.run_evals --verbose
+```
+
+Uses the configured LLM (costs tokens); devices are not contacted.
+
 # Tests
 
 ```

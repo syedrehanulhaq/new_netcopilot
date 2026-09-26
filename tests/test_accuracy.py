@@ -1,7 +1,5 @@
 import asyncio
-import json
 
-import pytest
 from fastapi.testclient import TestClient
 
 from adapters.devices import parsers

@@ -214,6 +214,35 @@ def list_devices_detailed() -> list[dict]:
     ]
 
 
+def find_device(identifier: str) -> Optional[str]:
+    """
+    Resolve an inventory device name from a name, FQDN, IP/host, or 'host:port'
+    (as found in LLDP system names, alert labels, syslog hosts). Case-insensitive.
+    """
+    ident = str(identifier or "").strip().lower()
+    if not ident:
+        return None
+    reg = _registry()
+    names = {n.lower(): n for n in reg}
+    candidates = [ident]
+    if ident.count(":") == 1:          # host:port (not IPv6)
+        candidates.append(ident.split(":", 1)[0])
+    candidates += [c.split(".", 1)[0] for c in list(candidates) if not c.replace(".", "").isdigit()]
+    for candidate in candidates:
+        if candidate in names:
+            return names[candidate]
+    for candidate in candidates:
+        for name, info in reg.items():
+            host = str(info.get("host", "")).lower()
+            if host and (host == candidate or host.split(".", 1)[0] == candidate):
+                return name
+    for candidate in candidates:       # inventory names that are FQDNs themselves
+        for lname, real in names.items():
+            if lname.split(".", 1)[0] == candidate:
+                return real
+    return None
+
+
 def make_tool_name(vendor: str, base_tool: str) -> str:
     """Return the prefixed tool name, e.g. cisco_get_cpu_memory."""
     return f"{vendor}_{base_tool}"
