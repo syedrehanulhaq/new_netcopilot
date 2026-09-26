@@ -341,6 +341,36 @@ _SETTINGS_SCHEMA = [
 ]
 
 
+# Built-in defaults shown in the Admin UI (a blank field means "use this").
+_SETTING_DEFAULTS = {
+    "LLM_PROVIDER": "openai",
+    "OPENAI_MODEL": "gpt-4.1-mini",
+    "ANTHROPIC_MODEL": "claude-opus-5-5",
+    "ANTHROPIC_MAX_TOKENS": "16000",
+    "ANTHROPIC_FALLBACK": "auto",
+    "LOCAL_LLM_MODEL": "llama3.1",
+    "NETCONF_PORT": "830",
+    "NETCONF_TIMEOUT": "30",
+    "JIRA_DEFAULT_ISSUE_TYPE": "Task",
+    "JIRA_DEFAULT_PRIORITY": "Medium",
+    "JIRA_DEFAULT_TEAM": "NOC",
+    "SLACK_ROLE": "noc",
+    "TEAMS_ROLE": "noc",
+    "AUTO_INVESTIGATE_ROLE": "noc",
+    "AUTO_INVESTIGATE_MAX_PER_HOUR": "20",
+    "ALERT_DEDUPE_MINUTES": "30",
+    "RATE_LIMIT_PER_MIN": "60",
+    "TOOL_RESULT_MAX_CHARS": "24000",
+    "CHAT_RETENTION_DAYS": "14",
+    "ALERT_RETENTION_DAYS": "7",
+    "AUDIT_RETENTION_DAYS": "90",
+    "SESSION_MAX_AGE_HOURS": "12",
+    "SSH_KNOWN_HOSTS_FILE": "~/.ssh/known_hosts",
+    "REDACT_DEVICE_SECRETS": "true",
+    "SSH_STRICT_HOST_KEY_CHECKING": "false",
+}
+
+
 # ---------------------------------------------------------------------------
 # Rate limiting, metrics
 # ---------------------------------------------------------------------------
@@ -841,6 +871,24 @@ class AlertIngestRequest(BaseModel):
 _TOOL_RESULT_MAX_CHARS = 24_000
 
 
+def _llm_error_message(exc: Exception) -> str:
+    """Actionable text for common LLM API failures (never includes keys)."""
+    status = getattr(exc, "status_code", None)
+    text = str(exc).lower()
+    if "workspace" in text and "anthropic-workspace-id" in text:
+        return ("The Anthropic API key is not scoped to a workspace. An admin must set "
+                "'Anthropic workspace ID' (wrkspc_...) in Admin → LLM, or use a workspace-scoped key.")
+    if status in (401, 403) or "authentication" in text or "invalid x-api-key" in text:
+        return "The LLM provider rejected the API key. An admin should check the key in Admin → LLM."
+    if status == 404 or "model" in text and ("not found" in text or "not_found" in text):
+        return "The configured LLM model was not found. An admin should check the model name in Admin → LLM."
+    if status == 429:
+        return "The LLM provider is rate-limiting requests. Please retry in a minute."
+    if status is not None and status >= 500:
+        return "The LLM provider is having problems. Please retry shortly."
+    return "LLM request failed. Please retry later."
+
+
 def _alert_investigation_prompt(context: str) -> str:
     return (
         "Investigate this network alert. Confirm the current state with the device tools, "
@@ -998,7 +1046,7 @@ async def _agentic_loop(
             with _metrics_lock:
                 _metrics["llm_errors_total"] += 1
             yield _usage_event()
-            yield {"type": "error", "text": "LLM request failed. Please retry later."}
+            yield {"type": "error", "text": _llm_error_message(exc)}
             return
 
         usage = getattr(response, "usage", None)
@@ -2147,6 +2195,7 @@ async def admin_settings(request: Request):
                 "secret": is_secret,
                 "has_value": bool(raw_value),
                 "value": "" if is_secret else raw_value,
+                "default": _SETTING_DEFAULTS.get(key, ""),
                 "restart_required": True,
                 "locked": guardrails_locked() and key in GUARDRAIL_KEYS,
             }

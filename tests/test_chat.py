@@ -163,3 +163,17 @@ def test_anthropic_workspace_header_is_sent_when_configured(monkeypatch):
     assert get_llm_adapter().client.default_headers["anthropic-workspace-id"] == "wrkspc_abc"
     monkeypatch.delenv("ANTHROPIC_WORKSPACE_ID")
     assert "anthropic-workspace-id" not in get_llm_adapter().client.default_headers
+
+
+@pytest.mark.parametrize("status,message,expected", [
+    (400, "This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header",
+     "Anthropic workspace ID"),
+    (401, "invalid x-api-key", "rejected the API key"),
+    (404, "model: not_found_error", "model was not found"),
+    (429, "rate limited", "rate-limiting"),
+    (None, "connection reset", "LLM request failed"),
+])
+def test_llm_errors_are_actionable(status, message, expected):
+    exc = Exception(message)
+    exc.status_code = status
+    assert expected in appmod._llm_error_message(exc)

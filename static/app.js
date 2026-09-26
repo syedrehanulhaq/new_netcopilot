@@ -1417,7 +1417,9 @@ async function loadSettings() {
         const right = document.createElement("div");
         const input = document.createElement("input");
         input.type = item.secret ? "password" : "text";
-        input.placeholder = item.secret && item.has_value ? "••••••••" : "";
+        input.placeholder = item.secret && item.has_value
+      ? "••••••••"
+      : item.default ? `default: ${item.default}` : "";
         input.value = item.secret ? "" : item.value || "";
         input.dataset.key = item.key;
         right.appendChild(input);

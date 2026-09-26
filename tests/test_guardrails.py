@@ -226,3 +226,17 @@ def test_strict_host_key_checking_params(monkeypatch):
     params = ssh_options.netmiko_host_key_params()
     assert params["ssh_strict"] is True and params["alt_key_file"] == "/etc/netcopilot/known_hosts"
     assert ssh_options.junos_host_key_params() == {"hostkey_verify": True}
+
+
+def test_blank_admin_values_fall_back_to_defaults(client):
+    # Saving a section with empty fields must not override built-in defaults.
+    r = client.post("/admin/settings", json={"settings": {"ANTHROPIC_MODEL": "", "ANTHROPIC_WORKSPACE_ID": ""}})
+    assert r.status_code == 200
+    assert settings.get_setting("ANTHROPIC_MODEL", "claude-opus-5-5") == "claude-opus-5-5"
+    client.post("/admin/settings", json={"settings": {"ANTHROPIC_MODEL": "claude-sonnet-5"}})
+    assert settings.get_setting("ANTHROPIC_MODEL", "claude-opus-5-5") == "claude-sonnet-5"
+    client.post("/admin/settings", json={"settings": {"ANTHROPIC_MODEL": "  "}})  # clearing restores default
+    assert settings.get_setting("ANTHROPIC_MODEL", "claude-opus-5-5") == "claude-opus-5-5"
+    entry = next(e for e in client.get("/admin/settings").json()["settings"] if e["key"] == "ANTHROPIC_MODEL")
+    assert entry["default"] == "claude-opus-5-5"
+    assert not settings.is_secret_setting("ANTHROPIC_MAX_TOKENS")

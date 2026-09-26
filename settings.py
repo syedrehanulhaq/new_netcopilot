@@ -67,7 +67,7 @@ def guardrails_locked() -> bool:
 
 
 # Names that match the secret pattern but hold non-sensitive values.
-_NOT_SECRET = frozenset({"JIRA_PROJECT_KEY"})
+_NOT_SECRET = frozenset({"JIRA_PROJECT_KEY", "ANTHROPIC_MAX_TOKENS"})
 
 
 def is_secret_setting(key: str) -> bool:
@@ -157,15 +157,16 @@ def _init_settings_db() -> None:
 
 def get_setting(key: str, default: str = "") -> str:
     if key in GUARDRAIL_KEYS and guardrails_locked():
-        return os.environ.get(key, default)
+        return os.environ.get(key, "") or default
     _init_settings_db()
     with sqlite3.connect(_SETTINGS_DB) as conn:
         row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-    if row and row[0] is not None:
+    if row and row[0]:
         value = _decrypt(row[0])
-        if value is not None:
+        if value:
             return value
-    return os.environ.get(key, default)
+    # A blank stored value means "not set here": fall back to env, then the default.
+    return os.environ.get(key, "") or default
 
 
 def get_setting_int(key: str, default: int) -> int:
@@ -200,9 +201,13 @@ def set_settings(values: Dict[str, Any]) -> None:
                 f"Locked by NETCOPILOT_LOCK_GUARDRAILS (set via deployment config): {', '.join(locked)}"
             )
     _init_settings_db()
-    rows = []
+    rows, cleared = [], []
     for k, v in values.items():
-        key, value = str(k), str(v)
-        rows.append((key, _encrypt(value) if is_secret_setting(key) and value else value))
+        key, value = str(k), str(v).strip()
+        if not value:
+            cleared.append((key,))  # blank = back to the environment / built-in default
+            continue
+        rows.append((key, _encrypt(value) if is_secret_setting(key) else value))
     with sqlite3.connect(_SETTINGS_DB) as conn:
         conn.executemany("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", rows)
+        conn.executemany("DELETE FROM settings WHERE key = ?", cleared)
