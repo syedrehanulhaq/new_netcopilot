@@ -45,7 +45,7 @@ config:
   RATE_LIMIT_PER_MIN: "120"
   DEVICE_REGISTRY_PATH: /app/devices.yaml
   LLM_PROVIDER: openai
-  OPENAI_MODEL: gpt-4.1-mini
+  OPENAI_MODEL: gpt-5.6-sol
 
 secrets:
   NETCOPILOT_API_KEYS: ""        # "key:admin,key2:noc" — or configure Auth0 SSO

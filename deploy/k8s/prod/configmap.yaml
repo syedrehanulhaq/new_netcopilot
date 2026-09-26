@@ -11,7 +11,7 @@ data:
   RATE_LIMIT_PER_MIN: "120"
   DEVICE_REGISTRY_PATH: "/app/devices.yaml"
   LLM_PROVIDER: "openai"
-  OPENAI_MODEL: "gpt-4.1-mini"
+  OPENAI_MODEL: "gpt-5.6-sol"
   # Guardrails (locked: NETCOPILOT_LOCK_GUARDRAILS=true in the Deployment)
   REDACT_DEVICE_SECRETS: "true"
   AUDIT_RETENTION_DAYS: "365"

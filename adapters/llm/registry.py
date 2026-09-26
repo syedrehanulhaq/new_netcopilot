@@ -5,6 +5,13 @@ from adapters.llm.openai_adapter import OpenAIAdapter
 from settings import get_setting
 
 
+def _int_setting(key: str, default: int) -> int:
+    try:
+        return int(get_setting(key, str(default)))
+    except ValueError:
+        return default
+
+
 def get_llm_adapter() -> Optional[LLMAdapter]:
     provider = get_setting("LLM_PROVIDER", "openai").lower()
 
@@ -30,9 +37,18 @@ def get_llm_adapter() -> Optional[LLMAdapter]:
         if not local_base_url:
             return None
         local_api_key = get_setting("LOCAL_LLM_API_KEY", "local")
-        return OpenAIAdapter(api_key=local_api_key, base_url=local_base_url)
+        return OpenAIAdapter(
+            api_key=local_api_key,
+            base_url=local_base_url,
+            reasoning_effort=get_setting("LOCAL_LLM_REASONING_EFFORT", ""),
+            max_completion_tokens=_int_setting("LOCAL_LLM_MAX_COMPLETION_TOKENS", 0),
+        )
 
     openai_api_key = get_setting("OPENAI_API_KEY", "")
     if not openai_api_key:
         return None
-    return OpenAIAdapter(api_key=openai_api_key)
+    return OpenAIAdapter(
+        api_key=openai_api_key,
+        reasoning_effort=get_setting("OPENAI_REASONING_EFFORT", ""),
+        max_completion_tokens=_int_setting("OPENAI_MAX_COMPLETION_TOKENS", 0),
+    )

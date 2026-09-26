@@ -51,7 +51,7 @@ SLACK_SIGNING_SECRET = get_setting("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_TOKEN = get_setting("SLACK_BOT_TOKEN", "")
 SLACK_ALERT_CHANNEL = get_setting("SLACK_ALERT_CHANNEL", "")
 
-OPENAI_MODEL = get_setting("OPENAI_MODEL", "gpt-4.1-mini")
+OPENAI_MODEL = get_setting("OPENAI_MODEL", "gpt-5.6-sol")
 
 ANTHROPIC_API_KEY = get_setting("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = get_setting("ANTHROPIC_MODEL", "claude-opus-5-5")

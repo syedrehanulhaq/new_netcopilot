@@ -234,6 +234,8 @@ _SETTINGS_SCHEMA = [
     {"key": "LLM_PROVIDER", "label": "LLM provider (openai / anthropic / local)", "category": "LLM"},
     {"key": "OPENAI_API_KEY", "label": "OpenAI API key", "category": "LLM", "secret": True},
     {"key": "OPENAI_MODEL", "label": "OpenAI model", "category": "LLM"},
+    {"key": "OPENAI_REASONING_EFFORT", "label": "OpenAI reasoning effort: none / low / medium / high / xhigh / max (blank = model default)", "category": "LLM"},
+    {"key": "OPENAI_MAX_COMPLETION_TOKENS", "label": "OpenAI max completion tokens (blank = model default)", "category": "LLM"},
     {"key": "ANTHROPIC_API_KEY", "label": "Anthropic API key", "category": "LLM", "secret": True},
     {"key": "ANTHROPIC_MODEL", "label": "Anthropic model", "category": "LLM"},
     {"key": "ANTHROPIC_WORKSPACE_ID", "label": "Anthropic workspace ID (only for keys not scoped to a workspace)", "category": "LLM"},
@@ -344,7 +346,7 @@ _SETTINGS_SCHEMA = [
 # Built-in defaults shown in the Admin UI (a blank field means "use this").
 _SETTING_DEFAULTS = {
     "LLM_PROVIDER": "openai",
-    "OPENAI_MODEL": "gpt-4.1-mini",
+    "OPENAI_MODEL": "gpt-5.6-sol",
     "ANTHROPIC_MODEL": "claude-opus-5-5",
     "ANTHROPIC_MAX_TOKENS": "16000",
     "ANTHROPIC_FALLBACK": "auto",
@@ -787,7 +789,7 @@ def _get_llm_settings() -> dict[str, str]:
     return {
         "provider": provider,
         "openai_api_key": get_setting("OPENAI_API_KEY", ""),
-        "openai_model": get_setting("OPENAI_MODEL", "gpt-4.1-mini"),
+        "openai_model": get_setting("OPENAI_MODEL", "gpt-5.6-sol"),
         "anthropic_api_key": get_setting("ANTHROPIC_API_KEY", ""),
         "anthropic_model": get_setting("ANTHROPIC_MODEL", "claude-opus-5-5"),
         "local_base_url": get_setting("LOCAL_LLM_BASE_URL", ""),
