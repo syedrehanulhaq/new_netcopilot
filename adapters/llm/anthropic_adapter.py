@@ -59,8 +59,15 @@ class _Choice:
 
 
 @dataclass
+class _Usage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+
+@dataclass
 class _Response:
     choices: List[_Choice]
+    usage: Optional[_Usage] = None
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +228,14 @@ def _build_response(anthropic_response) -> _Response:
 
     finish_reason = "tool_calls" if stop_reason == "tool_use" else "stop"
 
-    return _Response(choices=[_Choice(message=msg, finish_reason=finish_reason)])
+    usage = getattr(anthropic_response, "usage", None)
+    return _Response(
+        choices=[_Choice(message=msg, finish_reason=finish_reason)],
+        usage=_Usage(
+            prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
+            completion_tokens=getattr(usage, "output_tokens", 0) or 0,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

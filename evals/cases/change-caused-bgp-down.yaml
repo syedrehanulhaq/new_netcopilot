@@ -1,0 +1,39 @@
+id: change-caused-bgp-down
+description: BGP neighbor went Idle minutes after a commit that shut it down. Answer must connect the change to the outage.
+question: "Why did BGP to 10.0.0.9 on xr1 go down about 10 minutes ago?"
+devices: {xr1: cisco}
+tool_responses:
+  cisco_get_bgp_neighbor_status:
+    device: xr1
+    neighbor: 10.0.0.9
+    state: Idle
+    last_reset: "00:09:12, Admin. shutdown"
+  cisco_get_bgp_summary:
+    device: xr1
+    peers:
+      - {neighbor: 10.0.0.9, state_or_prefixes: Idle, established: false}
+  cisco_get_ping:
+    device: xr1
+    destination: 10.0.0.9
+    received: 5
+    sent: 5
+    packet_loss_pct: 0
+  cisco_get_recent_changes:
+    device: xr1
+    changes:
+      - {commit_id: "1000000226", user: alice, client: CLI, time: "Sat Sep 26 09:58:01 2026"}
+    last_change: {commit_id: "1000000226", user: alice, client: CLI, time: "Sat Sep 26 09:58:01 2026"}
+  cisco_get_config_diff:
+    device: xr1
+    commit_id: "1000000226"
+    diff: |
+      Building configuration...
+      router bgp 65000
+       neighbor 10.0.0.9
+      +  shutdown
+      !
+      end
+expect:
+  must_call: ["cisco_get_recent_changes|run_playbook"]
+  must_mention: ["(?i)alice", "(?i)shut ?down", "(?i)1000000226|commit"]
+  must_not_mention: ["(?i)hold[ -]?timer expired"]

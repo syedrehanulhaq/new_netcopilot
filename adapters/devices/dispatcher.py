@@ -16,7 +16,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from adapters.devices.registry import get_vendor, correct_tool_vendor
+import re
+
+from adapters.devices.registry import correct_tool_vendor, get_vendor, list_devices
 from adapters.devices.safety import UnsafeInputError, validate_tool_args
 
 logger = logging.getLogger("netcopilot.dispatcher")
@@ -130,8 +132,9 @@ class ToolDispatcher:
             except Exception as exc:
                 logger.warning("Could not get MCP tools: %s", exc)
 
-        # Playbook meta-tool (all roles)
+        # Meta-tools (all roles)
         tools.append(_PLAYBOOK_SCHEMA)
+        tools.append(_CHECK_LINK_SCHEMA)
 
         return tools
 
@@ -142,9 +145,11 @@ class ToolDispatcher:
     async def call_tool(self, tool_name: str, arguments: dict) -> Any:
         """Route a tool call to the correct backend."""
 
-        # Playbook runner
+        # Meta-tools
         if tool_name == "run_playbook":
             return await self._run_playbook(arguments)
+        if tool_name == "check_link":
+            return await self._check_link(arguments)
 
         # Vendor correction for device tools
         device = arguments.get("device", "")
@@ -181,6 +186,8 @@ class ToolDispatcher:
         Example: call_tool_unprefixed("get_bgp_summary", {"device": "pe1"})
                  → internally calls call_tool("junos_get_bgp_summary", {"device": "pe1"})
         """
+        if tool_name == "check_link":
+            return await self._check_link(arguments)
         if tool_name in _PLAYBOOK_INTEGRATION_ALIASES:
             return await self.call_tool(_PLAYBOOK_INTEGRATION_ALIASES[tool_name], arguments)
         if _is_integration_tool(tool_name):
@@ -270,6 +277,54 @@ class ToolDispatcher:
             **({"error": result.error} if result.error else {}),
         }
 
+    async def _check_link(self, arguments: dict) -> dict:
+        """
+        Check both ends of a link: local interface health, identify the far end
+        (LLDP, or the interface description when LLDP is gone because the link
+        is down), then the far end's interface health, plus a combined assessment.
+        """
+        device = str(arguments.get("device", ""))
+        interface = str(arguments.get("interface", ""))
+        if not device or not interface:
+            return {"error": "check_link requires 'device' and 'interface'."}
+
+        local = await self.call_tool_unprefixed("get_interface_health", {"device": device, "interface": interface})
+        if not isinstance(local, dict) or local.get("error"):
+            return {"device": device, "interface": interface, "local": local,
+                    "error": "Could not read the local interface.", "assessment": []}
+
+        lldp = await self.call_tool_unprefixed("get_lldp_neighbor", {"device": device, "interface": interface})
+        lldp = lldp if isinstance(lldp, dict) else {}
+        far_name = lldp.get("neighbor_device") or ""
+        far_if = lldp.get("neighbor_interface") or ""
+        source = "lldp"
+        remote_device = _match_inventory_device(far_name) if far_name else None
+        if not remote_device:
+            remote_device, desc_if = _peer_from_description(str(local.get("description") or ""), exclude=device)
+            if remote_device:
+                source = "interface description"
+                far_if = far_if or desc_if or ""
+
+        remote = None
+        if remote_device and far_if:
+            remote = await self.call_tool_unprefixed(
+                "get_interface_health", {"device": remote_device, "interface": far_if}
+            )
+
+        return {
+            "device": device,
+            "interface": interface,
+            "local": _link_fields(local),
+            "far_end": {
+                "lldp_name": far_name or None,
+                "inventory_device": remote_device,
+                "interface": far_if or None,
+                "identified_by": source if remote_device else None,
+            },
+            "remote": _link_fields(remote) if isinstance(remote, dict) else None,
+            "assessment": _assess_link(local, remote if isinstance(remote, dict) else None, remote_device, far_if),
+        }
+
     # ------------------------------------------------------------------
     # Status (for /health endpoint)
     # ------------------------------------------------------------------
@@ -352,3 +407,117 @@ _PLAYBOOK_SCHEMA: dict = {
         },
     },
 }
+
+
+# ------------------------------------------------------------------
+# check_link helpers
+# ------------------------------------------------------------------
+
+_CHECK_LINK_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "check_link",
+        "description": (
+            "Check BOTH ends of a link: local interface state/errors, the far-end device and "
+            "interface (via LLDP or the interface description), the far end's state/errors, and "
+            "an assessment (e.g. local down / remote up → suspect local optic or unidirectional fibre). "
+            "Use for interface down, flapping or error investigations."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "device": {"type": "string", "description": "Device name from inventory"},
+                "interface": {"type": "string", "description": "Local interface name"},
+            },
+            "required": ["device", "interface"],
+        },
+    },
+}
+
+_LINK_FIELDS = (
+    "admin_status", "oper_status", "description", "last_flapped", "last_link_flapped",
+    "carrier_transitions", "input_errors", "output_errors", "crc_errors",
+    "rx_power_dbm", "tx_power_dbm", "error",
+)
+
+
+def _link_fields(result: dict | None) -> dict | None:
+    if not isinstance(result, dict):
+        return None
+    return {k: result[k] for k in _LINK_FIELDS if result.get(k) not in (None, "")}
+
+
+def _match_inventory_device(name: str) -> str | None:
+    """Map an LLDP system name (possibly an FQDN) to an inventory device name."""
+    wanted = name.strip().lower()
+    if not wanted:
+        return None
+    names = {d["name"].lower(): d["name"] for d in list_devices()}
+    if wanted in names:
+        return names[wanted]
+    short = wanted.split(".", 1)[0]
+    if short in names:
+        return names[short]
+    for lname, real in names.items():
+        if lname.split(".", 1)[0] == short:
+            return real
+    return None
+
+
+_IFACE_TOKEN = re.compile(r"\b([a-z]{2,4}-\d+/\d+/\d+(?:[.:]\d+)?|[A-Za-z]+(?:Ethernet)?\d+(?:/\d+){1,3}(?:\.\d+)?|\d+/\d+/\d+)\b")
+
+
+def _peer_from_description(description: str, exclude: str) -> tuple[str | None, str | None]:
+    """Find an inventory device (and interface) mentioned in e.g. 'to pe2 xe-0/0/1'."""
+    if not description:
+        return None, None
+    tokens = re.split(r"[\s,;:()\[\]]+", description)
+    for token in tokens:
+        match = _match_inventory_device(token)
+        if match and match != exclude:
+            iface = _IFACE_TOKEN.search(description)
+            return match, iface.group(1) if iface else None
+    return None, None
+
+
+def _num(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _assess_link(local: dict, remote: dict | None, remote_device: str | None, far_if: str) -> list[str]:
+    notes: list[str] = []
+    l_admin, l_oper = str(local.get("admin_status", "")).lower(), str(local.get("oper_status", "")).lower()
+    if l_admin == "down":
+        notes.append("Local end is administratively down (shutdown/disable in config).")
+    elif l_oper == "down":
+        notes.append("Local end is admin up but operationally down.")
+    elif l_oper == "up":
+        notes.append("Local end is up.")
+
+    if not remote_device:
+        notes.append("Far end not identified (no LLDP neighbor and no inventory device in the description).")
+    elif remote is None:
+        notes.append(f"Far end {remote_device} identified but its interface is unknown; check it manually.")
+    elif remote.get("error"):
+        notes.append(f"Could not read far end {remote_device} {far_if}: {remote.get('error')}")
+    else:
+        r_admin, r_oper = str(remote.get("admin_status", "")).lower(), str(remote.get("oper_status", "")).lower()
+        if r_admin == "down":
+            notes.append(f"Far end {remote_device} {far_if} is administratively down — check the peer's configuration.")
+        if l_oper == "down" and r_oper == "down" and l_admin != "down" and r_admin != "down":
+            notes.append("Both ends are down while admin up: physical layer (fibre, patching, optics) or a transport fault is likely.")
+        elif l_oper == "down" and r_oper == "up":
+            notes.append("Asymmetric: local down, far end up — suspect the local receive path (optic, Rx power, unidirectional fibre).")
+        elif l_oper == "up" and r_oper == "down":
+            notes.append("Asymmetric: local up, far end down — suspect the far end's receive path.")
+        elif l_oper == "up" and r_oper == "up":
+            notes.append("Both ends are up.")
+        for data, name in ((local, "local end"), (remote, remote_device)):
+            crc = _num(data.get("crc_errors"))
+            if crc > 0:
+                notes.append(f"CRC errors on the {name} ({crc}): corruption arriving at its receiver — check the "
+                             f"cable/optic feeding it and the transmitter on the other side.")
+    return notes

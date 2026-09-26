@@ -19,6 +19,7 @@ from typing import Any, Callable, Optional
 
 from credentials import get_secret
 from adapters.devices.registry import resolve_host
+from adapters.devices.parsers import parse_nokia_bgp_neighbor, parse_nokia_port_detail
 from adapters.devices.pool import get_pool, CircuitOpenError
 from adapters.devices.safety import UnsafeInputError, reject_control_chars, validate_cli_command
 from adapters.devices.ssh_cache import SSHSessionCache
@@ -130,6 +131,7 @@ def _sync_get_interface_health(device: str, interface: str) -> dict:
     rif = _run_cli(device, f"show router interface {interface}")
     return {
         "device": device, "interface": interface,
+        **parse_nokia_port_detail(port.get("output", "")),
         "port": port, "router_interface": rif,
     }
 
@@ -163,7 +165,8 @@ def _sync_get_lldp_neighbor(device: str, interface: str) -> dict:
 
 
 def _sync_get_bgp_neighbor_status(device: str, neighbor: str) -> dict:
-    return _run_cli(device, f"show router bgp neighbor {neighbor}")
+    result = _run_cli(device, f"show router bgp neighbor {neighbor}")
+    return {**result, "neighbor": neighbor, **parse_nokia_bgp_neighbor(result.get("output", ""))}
 
 
 def _sync_get_bgp_summary(device: str) -> dict:

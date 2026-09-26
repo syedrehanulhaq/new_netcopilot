@@ -1,0 +1,34 @@
+id: bgp-hold-timer
+description: BGP session down after hold-timer expiry; no recent config change. Answer must name the cause and not invent a change.
+question: "BGP to 10.0.0.2 on pe1 keeps dropping. What's wrong?"
+devices: {pe1: junos}
+tool_responses:
+  junos_get_bgp_neighbor_status:
+    device: pe1
+    neighbor: 10.0.0.2
+    state: Active
+    last_state: Established
+    last_event: HoldTime
+    last_error: "Hold Timer Expired Error"
+    flap_count: 14
+    received_prefixes: 0
+  junos_get_bgp_summary:
+    device: pe1
+    peers:
+      - {address: 10.0.0.2, as: "65001", state: Active, flap_count: 14}
+      - {address: 10.0.0.3, as: "65001", state: Established, flap_count: 0}
+  junos_get_ping:
+    device: pe1
+    destination: 10.0.0.2
+    transmitted: 5
+    received: 3
+    packet_loss_pct: 40.0
+  junos_get_recent_changes:
+    device: pe1
+    changes:
+      - {sequence: "0", user: alice, client: cli, time: "2026-08-20 10:00:00 UTC", comment: "ntp servers"}
+    last_change: {sequence: "0", user: alice, client: cli, time: "2026-08-20 10:00:00 UTC", comment: "ntp servers"}
+expect:
+  must_call: ["junos_get_bgp_neighbor_status|run_playbook"]
+  must_mention: ["(?i)hold[ -]?time", "10\\.0\\.0\\.2", "(?i)(packet loss|loss|40 ?%)"]
+  must_not_mention: ["(?i)set protocols bgp", "(?i)\\bdeactivate\\b"]

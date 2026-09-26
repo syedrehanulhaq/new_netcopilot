@@ -30,7 +30,7 @@ def test_store_backed_playbooks_actually_run_their_steps():
             "get_ping": {"packet_loss_pct": 100.0},
         },
     )
-    assert [c[0] for c in calls] == ["get_bgp_neighbor_status", "get_bgp_summary", "get_ping"]
+    assert [c[0] for c in calls] == ["get_bgp_neighbor_status", "get_bgp_summary", "get_ping", "get_recent_changes"]
     assert result.severity == "Critical"
     assert result.evidence["state"] == "Idle"
     assert result.evidence["last_error"] == "Hold Timer Expired"

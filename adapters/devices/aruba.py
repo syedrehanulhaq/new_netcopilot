@@ -27,6 +27,7 @@ from typing import Any, Callable, Optional
 
 from credentials import get_secret
 from adapters.devices.registry import resolve_host, get_device_info
+from adapters.devices.parsers import parse_aruba_bgp_summary, parse_aruba_interface
 from adapters.devices.pool import get_pool, CircuitOpenError
 from adapters.devices.safety import UnsafeInputError, reject_control_chars, validate_cli_command
 from adapters.devices.ssh_cache import SSHSessionCache
@@ -149,9 +150,12 @@ async def _run_tool(device: str, fn, *fn_args, **err_extra) -> dict:
 def _sync_get_interface_health(device: str, interface: str) -> dict:
     detail = _run_cli(device, f"show interface {interface}")
     stats  = _run_cli(device, f"show interface {interface} statistics")
+    parsed = parse_aruba_interface(stats.get("output", ""))
+    parsed.update(parse_aruba_interface(detail.get("output", "")))  # detail wins on overlap
     return {
         "device": device,
         "interface": interface,
+        **parsed,
         "detail": detail,
         "statistics": stats,
     }
@@ -162,7 +166,8 @@ def _sync_get_interface_status(device: str) -> dict:
 
 
 def _sync_get_interface_counters(device: str, interface: str) -> dict:
-    return _run_cli(device, f"show interface {interface} statistics")
+    result = _run_cli(device, f"show interface {interface} statistics")
+    return {**result, "interface": interface, **parse_aruba_interface(result.get("output", ""))}
 
 
 def _sync_get_lldp_neighbor(device: str, interface: str) -> dict:
@@ -189,11 +194,22 @@ def _sync_get_lldp_neighbor(device: str, interface: str) -> dict:
 
 
 def _sync_get_bgp_neighbor_status(device: str, neighbor: str) -> dict:
-    return _run_cli(device, f"show bgp all-vrf all neighbors {neighbor}")
+    result = _run_cli(device, f"show bgp all-vrf all neighbors {neighbor}")
+    summary = _run_cli(device, "show bgp all-vrf all summary")
+    for peer in parse_aruba_bgp_summary(summary.get("output", "")):
+        if peer["address"] == neighbor:
+            return {**result, "neighbor": neighbor, "state": peer["state"], "peer_as": peer["as"]}
+    return {**result, "neighbor": neighbor}
 
 
 def _sync_get_bgp_summary(device: str) -> dict:
-    return _run_cli(device, "show bgp all-vrf all summary")
+    result = _run_cli(device, "show bgp all-vrf all summary")
+    peers = parse_aruba_bgp_summary(result.get("output", ""))
+    if not peers:
+        return result
+    down = sum(1 for p in peers if p["state"].lower() != "established")
+    return {**result, "peers": peers,
+            "summary": {"total": len(peers), "established": len(peers) - down, "down": down}}
 
 
 def _sync_get_ospf_neighbors(device: str) -> dict:

@@ -341,6 +341,13 @@ _metrics: dict[str, Any] = {
     "tool_calls_total": 0,
     "tool_errors_total": 0,
     "tool_counts": {},
+    "tool_error_counts": {},
+    "llm_calls_total": 0,
+    "llm_errors_total": 0,
+    "llm_prompt_tokens_total": 0,
+    "llm_completion_tokens_total": 0,
+    "chat_seconds_sum": 0.0,
+    "chat_seconds_count": 0,
 }
 
 _rate_limit_lock = threading.Lock()
@@ -938,6 +945,7 @@ async def _agentic_loop(
         if is_error:
             with _metrics_lock:
                 _metrics["tool_errors_total"] += 1
+                _metrics["tool_error_counts"][name] = _metrics["tool_error_counts"].get(name, 0) + 1
 
         end_event = {"type": "tool_end", "name": name, "ms": tool_elapsed_ms}
         tool_msg = {
@@ -947,6 +955,11 @@ async def _agentic_loop(
             "content": _compact_tool_result(result),
         }
         return end_event, tool_msg
+
+    usage_totals = {"llm_calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
+
+    def _usage_event() -> dict:
+        return {"type": "usage", **usage_totals}
 
     for _turn in range(MAX_TOOL_TURNS):
         try:
@@ -959,11 +972,26 @@ async def _agentic_loop(
             )
         except Exception as exc:
             logger.exception("[request %s] LLM request failed: %s", request_id, exc)
+            with _metrics_lock:
+                _metrics["llm_errors_total"] += 1
+            yield _usage_event()
             yield {"type": "error", "text": "LLM request failed. Please retry later."}
             return
 
+        usage = getattr(response, "usage", None)
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+        usage_totals["llm_calls"] += 1
+        usage_totals["prompt_tokens"] += prompt_tokens
+        usage_totals["completion_tokens"] += completion_tokens
+        with _metrics_lock:
+            _metrics["llm_calls_total"] += 1
+            _metrics["llm_prompt_tokens_total"] += prompt_tokens
+            _metrics["llm_completion_tokens_total"] += completion_tokens
+
         msg = response.choices[0].message
         if not msg.tool_calls:
+            yield _usage_event()
             yield {"type": "reply", "content": msg.content or ""}
             return
 
@@ -988,6 +1016,7 @@ async def _agentic_loop(
             yield end_event
             messages.append(tool_msg)
 
+    yield _usage_event()
     yield {"type": "reply", "content": "Reached maximum reasoning depth. Please rephrase your question."}
 
 
@@ -1027,6 +1056,28 @@ def _build_chat_messages(message: str, user: str, role: str) -> tuple[list, list
         {"role": "user", "content": message},
     ]
     return messages, tools
+
+
+def _finish_chat(request_id: str, user: str, role: str, started: float, usage: dict, messages: list,
+                 error: Optional[str] = None) -> None:
+    """Metrics + audit record for a completed chat turn (tokens, tools, duration)."""
+    elapsed = time.time() - started
+    tools_used = [m.get("name") for m in messages if isinstance(m, dict) and m.get("role") == "tool"]
+    with _metrics_lock:
+        _metrics["chat_seconds_sum"] += elapsed
+        _metrics["chat_seconds_count"] += 1
+    _audit_log({
+        "event": "chat_end",
+        "request_id": request_id,
+        "user": user,
+        "role": role,
+        "ms": int(elapsed * 1000),
+        "tools": tools_used,
+        "llm_calls": usage.get("llm_calls", 0),
+        "prompt_tokens": usage.get("prompt_tokens", 0),
+        "completion_tokens": usage.get("completion_tokens", 0),
+        "error": error,
+    })
 
 
 def _remember_turn(user: str, message: str, reply: str, messages: list) -> None:
@@ -1086,15 +1137,20 @@ async def _run_chat(message: str, user: str, role: str, check_config: bool = Tru
     messages, tools = _build_chat_messages(message, user, role)
 
     reply = ""
+    usage: dict = {}
     async for event in _agentic_loop(request_id, messages, tools, model, user, role):
-        if event["type"] == "reply":
+        if event["type"] == "usage":
+            usage = event
+        elif event["type"] == "reply":
             reply = event["content"]
         elif event["type"] == "error":
+            _finish_chat(request_id, user, role, start_time, usage, messages, error=event["text"])
             return {"request_id": request_id, "reply": event["text"]}
 
     total_ms = int((time.time() - start_time) * 1000)
     logger.info("[request %s] /chat end ms=%d", request_id, total_ms)
 
+    _finish_chat(request_id, user, role, start_time, usage, messages)
     _remember_turn(user, message, reply, messages)
     return {"request_id": request_id, "reply": reply}
 
@@ -1180,13 +1236,22 @@ async def chat_stream(req: ChatRequest, request: Request):
     model = _llm_model(_get_llm_settings())
     messages, tools = _build_chat_messages(req.message, user, role)
 
+    started = time.time()
+
     async def event_generator():
         reply = ""
+        usage: dict = {}
+        error = None
         async for event in _agentic_loop(request_id, messages, tools, model, user, role):
-            if event["type"] == "reply":
+            if event["type"] == "usage":
+                usage = event
+            elif event["type"] == "reply":
                 reply = event["content"]
+            elif event["type"] == "error":
+                error = event["text"]
             yield f"data: {json.dumps(event)}\n\n"
         yield f'data: {json.dumps({"type": "done"})}\n\n'
+        _finish_chat(request_id, user, role, started, usage, messages, error=error)
         if reply:
             _remember_turn(user, req.message, reply, messages)
 
@@ -1723,10 +1788,49 @@ async def health_llm():
     return result
 
 
+def _prometheus_text(snapshot: dict[str, Any]) -> str:
+    def esc(value: str) -> str:
+        return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+    lines = []
+
+    def metric(name: str, kind: str, help_text: str, samples: list[tuple[str, Any]]) -> None:
+        lines.append(f"# HELP {name} {help_text}")
+        lines.append(f"# TYPE {name} {kind}")
+        for labels, value in samples:
+            lines.append(f"{name}{labels} {value}")
+
+    metric("netcopilot_chat_requests_total", "counter", "Chat turns sent to the LLM.",
+           [("", snapshot["requests_total"])])
+    metric("netcopilot_chat_duration_seconds", "summary", "Chat turn duration.",
+           [("_sum", round(snapshot["chat_seconds_sum"], 3)), ("_count", snapshot["chat_seconds_count"])])
+    metric("netcopilot_llm_calls_total", "counter", "LLM API calls.", [("", snapshot["llm_calls_total"])])
+    metric("netcopilot_llm_errors_total", "counter", "Failed LLM API calls.", [("", snapshot["llm_errors_total"])])
+    metric("netcopilot_llm_tokens_total", "counter", "LLM tokens by type.", [
+        ('{type="prompt"}', snapshot["llm_prompt_tokens_total"]),
+        ('{type="completion"}', snapshot["llm_completion_tokens_total"]),
+    ])
+    metric("netcopilot_tool_calls_total", "counter", "Tool calls by tool.",
+           [(f'{{tool="{esc(k)}"}}', v) for k, v in sorted(snapshot["tool_counts"].items())])
+    metric("netcopilot_tool_errors_total", "counter", "Failed tool calls by tool.",
+           [(f'{{tool="{esc(k)}"}}', v) for k, v in sorted(snapshot["tool_error_counts"].items())])
+    return "\n".join(lines) + "\n"
+
+
 @app.get("/metrics")
-async def metrics():
+async def metrics(request: Request, format: str = ""):
+    """Prometheus text format (default) or JSON (?format=json). Optional METRICS_TOKEN bearer auth."""
+    token = get_setting("METRICS_TOKEN", "")
+    if token:
+        presented = request.headers.get("Authorization", "")[7:] if request.headers.get(
+            "Authorization", "").lower().startswith("bearer ") else ""
+        if not hmac.compare_digest(presented.encode(), token.encode()):
+            raise HTTPException(status_code=401, detail="Metrics token required.")
     with _metrics_lock:
-        return dict(_metrics)
+        snapshot = json.loads(json.dumps(_metrics))
+    if format == "json":
+        return snapshot
+    return Response(_prometheus_text(snapshot), media_type="text/plain; version=0.0.4")
 
 
 @app.get("/version")

@@ -453,6 +453,39 @@ def _sync_get_chassis_health(device: str) -> dict:
     }
 
 
+def _sync_get_recent_changes(device: str, count: int = 10) -> dict:
+    from netmiko.utilities import get_structured_data_textfsm
+
+    output = _cli(device, "show configuration commit list")
+    parsed = get_structured_data_textfsm(output, platform="cisco_xr", command="show configuration commit list")
+    commits = []
+    if isinstance(parsed, list):
+        for row in parsed[: max(1, min(int(count), 50))]:
+            commits.append({
+                "commit_id": row.get("COMMIT") or row.get("commit"),
+                "user": row.get("USER") or row.get("user"),
+                "client": row.get("CLIENT") or row.get("client"),
+                "line": row.get("LINE") or row.get("line"),
+                "time": row.get("DATE_TIME") or row.get("date_time"),
+            })
+    result: dict[str, Any] = {"device": device, "changes": commits, "raw_output": output}
+    if commits:
+        result["last_change"] = commits[0]
+        result["summary"] = f"{len(commits)} recent commit(s); latest by {commits[0]['user']} at {commits[0]['time']}"
+    return result
+
+
+_XR_COMMIT_ID = re.compile(r"^\d{10}$")
+
+
+def _sync_get_config_diff(device: str, commit_id: str = "") -> dict:
+    if commit_id and not _XR_COMMIT_ID.match(str(commit_id)):
+        return {"device": device, "error": f"Invalid IOS XR commit id {commit_id!r} (10 digits expected)."}
+    command = f"show configuration commit changes {commit_id}" if commit_id else "show configuration commit changes last 1"
+    output = _cli(device, command)
+    return {"device": device, "command": command, "commit_id": commit_id or "last", "diff": output}
+
+
 def _sync_run_command(device: str, command: str) -> dict:
     output = _cli(device, command)
     return {"device": device, "command": command, "output": output, "raw_output": output}
@@ -547,6 +580,16 @@ async def get_chassis_health(device: str) -> dict:
     return await _run_tool(device, _sync_get_chassis_health, device)
 
 
+async def get_recent_changes(device: str, count: int = 10) -> dict:
+    """List recent configuration commits (show configuration commit list)."""
+    return await _run_tool(device, _sync_get_recent_changes, device, count)
+
+
+async def get_config_diff(device: str, commit_id: str = "") -> dict:
+    """Show what a commit changed (default: the most recent commit)."""
+    return await _run_tool(device, _sync_get_config_diff, device, commit_id)
+
+
 async def run_command(device: str, command: str) -> dict:
     """Run a read-only show/ping/traceroute CLI command on the device."""
     try:
@@ -578,6 +621,8 @@ TOOLS: dict[str, Callable] = {
     "get_ping": get_ping,
     "get_traceroute": get_traceroute,
     "get_chassis_health": get_chassis_health,
+    "get_recent_changes": get_recent_changes,
+    "get_config_diff": get_config_diff,
     "run_command": run_command,
 }
 
@@ -586,6 +631,37 @@ TOOLS: dict[str, Callable] = {
 # ---------------------------------------------------------------------------
 
 TOOL_SCHEMAS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "cisco_get_recent_changes",
+            "description": "List recent configuration commits on a Cisco IOS XR device (who, when, how). "
+                           "Use this to check whether a change preceded an incident.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device": {"type": "string"},
+                    "count": {"type": "integer", "default": 10, "description": "Number of commits (max 50)"},
+                },
+                "required": ["device"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cisco_get_config_diff",
+            "description": "Show the configuration lines changed by a commit on a Cisco IOS XR device (default: the latest commit). Secrets are redacted.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device": {"type": "string"},
+                    "commit_id": {"type": "string", "description": "10-digit commit ID from get_recent_changes (optional)"},
+                },
+                "required": ["device"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {

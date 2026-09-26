@@ -656,6 +656,44 @@ def _sync_get_optics(device: str, interface: str) -> dict:
         }
 
 
+def _sync_get_recent_changes(device: str, count: int = 10) -> dict:
+    """Commit history (show system commit)."""
+    with _connect(device) as dev:
+        rpc = dev.rpc.get_commit_information()
+        commits = []
+        for entry in _findall(rpc, ".//commit-history")[: max(1, min(int(count), 50))]:
+            commits.append({
+                "sequence": _find(entry, "sequence-number"),
+                "user": _find(entry, "user"),
+                "client": _find(entry, "client"),
+                "time": _find(entry, "date-time"),
+                "comment": _find(entry, "comment") or _find(entry, "log"),
+            })
+        result: dict[str, Any] = {"device": device, "changes": commits}
+        if commits:
+            result["last_change"] = commits[0]
+            result["summary"] = f"{len(commits)} recent commit(s); latest by {commits[0]['user']} at {commits[0]['time']}"
+        return result
+
+
+def _sync_get_config_diff(device: str, rollback: int = 1) -> dict:
+    """Diff of the active configuration against rollback N (show configuration | compare rollback N)."""
+    rollback = int(rollback)
+    if not 1 <= rollback <= 49:
+        return {"device": device, "error": "rollback must be between 1 and 49."}
+    with _connect(device) as dev:
+        rpc = dev.rpc.get_configuration(
+            options={"compare": "rollback", "rollback": str(rollback), "format": "text"}
+        )
+        node = rpc.find(".//configuration-output")
+        diff = node.text if node is not None and node.text else ""
+        return {
+            "device": device,
+            "compared_to": f"rollback {rollback}",
+            "diff": diff.strip() or "(no differences)",
+        }
+
+
 def _sync_run_command(device: str, command: str) -> dict:
     """Run an arbitrary show/diagnostic CLI command on a Junos device."""
     with _connect(device) as dev:
@@ -762,6 +800,16 @@ async def get_optics(device: str, interface: str, pool=None) -> dict:
     return await _run_tool(device, lambda: _sync_get_optics(device, interface), pool=pool)
 
 
+async def get_recent_changes(device: str, count: int = 10, pool=None) -> dict:
+    """List recent configuration commits (show system commit)."""
+    return await _run_tool(device, lambda: _sync_get_recent_changes(device, count), pool=pool)
+
+
+async def get_config_diff(device: str, rollback: int = 1, pool=None) -> dict:
+    """Configuration diff against rollback N (default 1 = what the last commit changed)."""
+    return await _run_tool(device, lambda: _sync_get_config_diff(device, rollback), pool=pool)
+
+
 async def run_command(device: str, command: str, pool=None) -> dict:
     """Run a read-only show/ping/traceroute CLI command on a Junos device."""
     try:
@@ -795,6 +843,8 @@ TOOLS: dict[str, Callable] = {
     "get_ping": get_ping,
     "get_traceroute": get_traceroute,
     "get_optics": get_optics,
+    "get_recent_changes": get_recent_changes,
+    "get_config_diff": get_config_diff,
     "run_command": run_command,
 }
 
@@ -803,6 +853,37 @@ TOOLS: dict[str, Callable] = {
 # ---------------------------------------------------------------------------
 
 TOOL_SCHEMAS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "junos_get_recent_changes",
+            "description": "List recent configuration commits on a Juniper Junos device (who, when, how). "
+                           "Use this to check whether a change preceded an incident.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device": {"type": "string"},
+                    "count": {"type": "integer", "default": 10, "description": "Number of commits (max 50)"},
+                },
+                "required": ["device"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "junos_get_config_diff",
+            "description": "Show what changed in the configuration compared with rollback N on a Juniper Junos device (default 1 = the last commit). Secrets are redacted.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device": {"type": "string"},
+                    "rollback": {"type": "integer", "default": 1, "description": "Rollback number 1-49"},
+                },
+                "required": ["device"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {

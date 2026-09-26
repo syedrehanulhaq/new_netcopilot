@@ -14,7 +14,8 @@
   intent: link_down
   tools:
     - get_interface_health
-    - get_lldp_neighbor
+    - check_link
+    - get_recent_changes
   evidence_fields:
     - admin_status
     - oper_status
@@ -25,8 +26,8 @@
     - input_errors
     - output_errors
     - carrier_transitions
-    - neighbor_device
-    - neighbor_interface
+    - assessment
+    - "get_recent_changes: last_change"
   severity_rules:
     critical:
       - "get_interface_health: admin_status=up & oper_status=down"
@@ -42,6 +43,7 @@
   tools:
     - get_interface_health
     - get_interface_counters
+    - check_link
     - get_top_flapping_links
   evidence_fields:
     - last_flapped
@@ -50,6 +52,7 @@
     - crc_errors
     - input_errors
     - output_errors
+    - assessment
   severity_rules:
     warning:
       - carrier_transitions>3
@@ -76,6 +79,7 @@
     - get_bgp_neighbor_status
     - get_bgp_summary
     - get_ping
+    - get_recent_changes
   evidence_fields:
     - "get_bgp_neighbor_status: state"
     - last_state
@@ -86,6 +90,7 @@
     - received_prefixes
     - accepted_prefixes
     - packet_loss_pct
+    - "get_recent_changes: last_change"
   severity_rules:
     critical:
       - "get_bgp_neighbor_status: state!=Established"
@@ -114,11 +119,13 @@
     - get_isis_neighbors
     - get_isis_interface
     - get_mtu_info
+    - get_recent_changes
   evidence_fields:
     - "get_isis_neighbors: state"
     - hold
     - level
     - mtu
+    - "get_recent_changes: last_change"
   severity_rules:
     critical:
       - "get_isis_neighbors: state=Down"
@@ -169,3 +176,14 @@
     warning:
       - "get_chassis_health: class=Minor"
       - "get_chassis_health: state=Offline"
+
+- name: Recent configuration change
+  intent: config_change
+  tools:
+    - get_recent_changes
+    - get_config_diff
+  evidence_fields:
+    - "get_recent_changes: last_change"
+    - "get_recent_changes: changes"
+    - diff
+  severity_rules: {}

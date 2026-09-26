@@ -1,0 +1,35 @@
+id: link-far-end-admin-down
+description: Local interface down because the far end (found via the description; LLDP is gone) is administratively down.
+question: "Gi0/0/0/1 on xr1 is down. Find the cause."
+devices: {xr1: cisco, pe1: junos}
+tool_responses:
+  cisco_get_interface_health:
+    device: xr1
+    interface: Gi0/0/0/1
+    admin_status: up
+    oper_status: down
+    description: "Core link to pe1 ge-0/0/1"
+    last_link_flapped: "00:12:31"
+    crc_errors: 0
+  cisco_get_lldp_neighbor:
+    device: xr1
+    interface: Gi0/0/0/1
+    error: "No LLDP neighbor found on this interface."
+  junos_get_interface_health:
+    device: pe1
+    interface: ge-0/0/1
+    admin_status: down
+    oper_status: down
+    description: "Core link to xr1 Gi0/0/0/1"
+  cisco_get_recent_changes:
+    device: xr1
+    changes: []
+  junos_get_recent_changes:
+    device: pe1
+    changes:
+      - {sequence: "0", user: bob, client: cli, time: "2026-09-26 09:47:10 UTC", comment: "disable ge-0/0/1 for fibre work"}
+    last_change: {sequence: "0", user: bob, client: cli, time: "2026-09-26 09:47:10 UTC", comment: "disable ge-0/0/1 for fibre work"}
+expect:
+  must_call: ["check_link|junos_get_interface_health|run_playbook"]
+  must_mention: ["pe1", "(?i)admin(istrative(ly)?)?[ -]?(state )?(is )?down|disabled|shut ?down"]
+  must_not_mention: ["(?i)replace the optic on xr1"]

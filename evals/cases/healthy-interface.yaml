@@ -1,0 +1,30 @@
+id: healthy-interface
+description: Interface is healthy; the answer must not invent a problem.
+question: "Is ge-0/0/2 on pe1 OK?"
+devices: {pe1: junos}
+tool_responses:
+  junos_get_interface_health:
+    device: pe1
+    interface: ge-0/0/2
+    admin_status: up
+    oper_status: up
+    description: "access to server rack 4"
+    last_flapped: "2026-06-01 08:00:00 UTC (16w6d ago)"
+    input_errors: 0
+    output_errors: 0
+    crc_errors: 0
+    carrier_transitions: 1
+  junos_get_lldp_neighbor:
+    device: pe1
+    interface: ge-0/0/2
+    error: "No LLDP neighbor found on this interface."
+  junos_get_optics:
+    device: pe1
+    interface: ge-0/0/2
+    rx_power_dbm: -2.1
+    tx_power_dbm: -1.8
+  default: {error: "not needed for this case"}
+expect:
+  must_call: ["junos_get_interface_health|check_link|run_playbook"]
+  must_mention: ["(?i)\\bup\\b", "(?i)(no|zero|0) (input |output |crc )?errors"]
+  must_not_mention: ["(?i)\\b(critical|outage)\\b", "(?i)interface is down"]

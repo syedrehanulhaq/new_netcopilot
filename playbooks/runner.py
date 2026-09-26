@@ -320,6 +320,10 @@ _TOOL_ARG_MAPS: dict[str, list[str]] = {
     "get_chassis_health": ["device"],
     # Integration (Prometheus) — no device argument
     "get_top_flapping_links": [],
+    # Change history and link meta-tool
+    "get_recent_changes": ["device"],
+    "get_config_diff": ["device"],
+    "check_link": ["device", "interface"],
 }
 
 # When a playbook param is absent, these params may stand in for it
