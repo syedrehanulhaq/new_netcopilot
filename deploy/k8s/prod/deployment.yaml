@@ -6,12 +6,12 @@ metadata:
   labels:
     app: netcopilot
 spec:
-  replicas: 2
+  # State (settings, audit, history) lives in SQLite on a ReadWriteOnce volume:
+  # run exactly one replica and stop the old pod before starting the new one.
+  # Horizontal scaling requires moving state to an external database first.
+  replicas: 1
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+    type: Recreate
   selector:
     matchLabels:
       app: netcopilot
@@ -21,24 +21,41 @@ spec:
         app: netcopilot
     spec:
       serviceAccountName: netcopilot
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
         fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: netcopilot
           image: netcopilot:prod
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8001
+          env:
+            - name: NETCOPILOT_DATA_DIR
+              value: /app/data
+            - name: NETCOPILOT_LOCK_GUARDRAILS
+              value: "true"
+            - name: SESSION_COOKIE_SECURE
+              value: "true"
           envFrom:
             - configMapRef:
                 name: netcopilot-config
             - secretRef:
                 name: netcopilot-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: data
               mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
             - name: devices
               mountPath: /app/devices.yaml
               subPath: devices.yaml
@@ -50,7 +67,7 @@ spec:
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /version
               port: 8001
             initialDelaySeconds: 10
             periodSeconds: 20
@@ -65,6 +82,8 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: netcopilot-data
+        - name: tmp
+          emptyDir: {}
         - name: devices
           configMap:
             name: netcopilot-devices

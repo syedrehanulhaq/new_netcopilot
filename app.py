@@ -3,6 +3,8 @@ import base64
 import csv
 import hashlib
 import hmac
+import html
+import io
 import json
 import logging
 import logging.handlers
@@ -20,9 +22,9 @@ from urllib.parse import parse_qs, urlencode
 import httpx
 import yaml
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from adapters.chat import get_slack_adapter
@@ -38,26 +40,14 @@ from config import (
     AUTH0_GROUP_ROLE_MAP,
     AUTH0_LOGOUT_URL,
     AUTH0_ROLE_CLAIM,
-    ALERT_INGEST_TOKEN,
-    JIRA_BASE_URL,
-    JIRA_DEFAULT_ISSUE_TYPE,
-    JIRA_DEFAULT_PRIORITY,
-    JIRA_DEFAULT_TEAM,
     LOG_DIR,
     LOG_LEVEL,
     LOG_TO_FILE,
-    NETCOPILOT_API_KEYS,
-    RATE_LIMIT_PER_MIN,
-    SESSION_SECRET,
-    SLACK_ALERT_CHANNEL,
-    SLACK_BOT_TOKEN,
-    SLACK_ROLE,
-    SLACK_SIGNING_SECRET,
-    SLACK_VERIFICATION_TOKEN,
-    TEAMS_ROLE,
-    TEAMS_VERIFICATION_TOKEN,
     reload_inventory_devices,
 )
+import audit
+import guardrails
+from redaction import redact_obj
 from adapters.devices.dispatcher import ToolDispatcher
 from adapters.devices.registry import (
     device_inventory_summary,
@@ -74,10 +64,13 @@ from playbooks.store import (
     upsert_playbooks,
 )
 from settings import (
+    GUARDRAIL_KEYS,
+    LockedSettingError,
     data_path,
     get_setting,
     get_setting_bool,
     get_setting_int,
+    guardrails_locked,
     list_settings,
     set_settings,
 )
@@ -119,6 +112,7 @@ if not logger.handlers:
 
 audit_logger = logging.getLogger("netcopilot.audit")
 audit_logger.setLevel(logging.INFO)
+audit_logger.propagate = False  # has its own handler; propagating printed every audit line twice
 if not audit_logger.handlers:
     if LOG_TO_FILE:
         os.makedirs(LOG_DIR, exist_ok=True)
@@ -144,16 +138,11 @@ _dispatcher: Optional[ToolDispatcher] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _mcp_client, _dispatcher
-    if SESSION_SECRET == "change-me":
-        logger.warning(
-            "SESSION_SECRET is set to the insecure default 'change-me'. "
-            "Set a strong random value in production."
-        )
-    if not NETCOPILOT_API_KEYS and not AUTH0_DOMAIN:
-        logger.warning(
-            "No API keys and no AUTH0_DOMAIN configured — all requests get admin access. "
-            "Set NETCOPILOT_API_KEYS or AUTH0_DOMAIN before deploying."
-        )
+    for check in guardrails.posture_report(AUTH0_DOMAIN):
+        if check["status"] in ("warn", "fail"):
+            logger.warning("security posture [%s] %s: %s %s", check["status"], check["title"],
+                           check["detail"], check["remediation"])
+    audit.init_audit_db()
     _init_memory_db()
     _init_alerts_db()
     # devices.yaml + NetBox/Nautobot (if configured) → device registry
@@ -170,12 +159,20 @@ async def lifespan(app: FastAPI):
     await _mcp_client.stop()
 
 
-app = FastAPI(title="NetCopilot", lifespan=lifespan)
+_API_DOCS = get_setting_bool("ENABLE_API_DOCS", True)
+app = FastAPI(
+    title="NetCopilot",
+    lifespan=lifespan,
+    docs_url="/docs" if _API_DOCS else None,
+    redoc_url="/redoc" if _API_DOCS else None,
+    openapi_url="/openapi.json" if _API_DOCS else None,
+)
 app.add_middleware(
     SessionMiddleware,
-    secret_key=SESSION_SECRET,
+    secret_key=guardrails.session_secret()[0],
     same_site="lax",
-    https_only=False,
+    https_only=get_setting_bool("SESSION_COOKIE_SECURE", False),
+    max_age=get_setting_int("SESSION_MAX_AGE_HOURS", 12) * 3600,
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -183,13 +180,26 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Security headers on every response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; "
+    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+)
+
+
 class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("X-XSS-Protection", "1; mode=block")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        if not request.url.path.startswith(("/docs", "/redoc")):  # Swagger/ReDoc load their own CDN assets
+            response.headers.setdefault("Content-Security-Policy", _CSP)
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        if not request.url.path.startswith("/static/"):
+            response.headers.setdefault("Cache-Control", "no-store")
+        if get_setting_bool("SESSION_COOKIE_SECURE", False):
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         return response
 
 app.add_middleware(_SecurityHeadersMiddleware)
@@ -276,7 +286,9 @@ _SETTINGS_SCHEMA = [
     {"key": "SLACK_BOT_TOKEN", "label": "Slack bot token", "category": "Slack", "secret": True},
     {"key": "SLACK_ALERT_CHANNEL", "label": "Slack alert channel", "category": "Slack"},
     {"key": "SLACK_ROLE", "label": "Slack default role", "category": "Slack"},
-    {"key": "TEAMS_VERIFICATION_TOKEN", "label": "Teams verification token", "category": "Teams", "secret": True},
+    {"key": "TEAMS_HMAC_SECRET", "label": "Teams outgoing webhook security token (HMAC)", "category": "Teams", "secret": True},
+    {"key": "TEAMS_RESULT_WEBHOOK_URL", "label": "Teams channel webhook for long-running results", "category": "Teams", "secret": True},
+    {"key": "TEAMS_VERIFICATION_TOKEN", "label": "Teams verification token (legacy)", "category": "Teams", "secret": True},
     {"key": "TEAMS_ROLE", "label": "Teams default role", "category": "Teams"},
     {"key": "PROMETHEUS_URL", "label": "Prometheus base URL", "category": "Prometheus"},
     {"key": "PROMETHEUS_FLAP_QUERY", "label": "Flap query", "category": "Prometheus"},
@@ -305,6 +317,15 @@ _SETTINGS_SCHEMA = [
     {"key": "LOG_REDACTION_ENABLED", "label": "Log redaction enabled", "category": "Security"},
     {"key": "LOG_REDACTION_FIELDS", "label": "Log redaction fields", "category": "Security"},
     {"key": "SESSION_SECRET", "label": "Session secret", "category": "Security", "secret": True},
+    {"key": "ALLOW_ANONYMOUS_ACCESS", "label": "Allow unauthenticated access from any host (lab only)", "category": "Security"},
+    {"key": "REDACT_DEVICE_SECRETS", "label": "Redact device secrets before the LLM (true/false)", "category": "Security"},
+    {"key": "SSH_STRICT_HOST_KEY_CHECKING", "label": "Verify device SSH host keys (true/false)", "category": "Security"},
+    {"key": "SSH_KNOWN_HOSTS_FILE", "label": "known_hosts file for device SSH", "category": "Security"},
+    {"key": "SESSION_COOKIE_SECURE", "label": "HTTPS-only session cookie (true/false)", "category": "Security"},
+    {"key": "SESSION_MAX_AGE_HOURS", "label": "Session lifetime (hours)", "category": "Security"},
+    {"key": "ALLOWED_ORIGINS", "label": "Extra allowed browser origins (comma-separated)", "category": "Security"},
+    {"key": "AUDIT_RETENTION_DAYS", "label": "Audit retention (days)", "category": "Security"},
+    {"key": "ENABLE_API_DOCS", "label": "Serve API docs at /docs (true/false, restart)", "category": "Security"},
     {"key": "LOG_TO_FILE", "label": "Log to file (true/false)", "category": "Logging"},
     {"key": "LOG_DIR", "label": "Log directory", "category": "Logging"},
 ]
@@ -325,7 +346,6 @@ _metrics: dict[str, Any] = {
 _rate_limit_lock = threading.Lock()
 _rate_limit: dict[str, list[float]] = {}
 _rate_limit_window = 60
-_rate_limit_max = RATE_LIMIT_PER_MIN
 
 
 _RATE_LIMIT_MAX_CLIENTS = 10_000  # cap dict size to prevent unbounded growth
@@ -335,7 +355,7 @@ def _enforce_rate_limit(client_id: str) -> None:
     now = time.time()
     with _rate_limit_lock:
         timestamps = [ts for ts in _rate_limit.get(client_id, []) if now - ts < _rate_limit_window]
-        if len(timestamps) >= _rate_limit_max:
+        if len(timestamps) >= get_setting_int("RATE_LIMIT_PER_MIN", 60):
             raise HTTPException(status_code=429, detail="Rate limit exceeded.")
         timestamps.append(now)
         _rate_limit[client_id] = timestamps
@@ -351,32 +371,47 @@ def _enforce_rate_limit(client_id: str) -> None:
 # Auth helpers
 # ---------------------------------------------------------------------------
 
-def _parse_api_keys() -> dict[str, str]:
-    keys: dict[str, str] = {}
-    for item in NETCOPILOT_API_KEYS.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        if ":" in item:
-            key, role = item.split(":", 1)
-            keys[key.strip()] = role.strip()
-        else:
-            keys[item] = "noc"
-    return keys
+def _client_host(request: Request) -> Optional[str]:
+    return request.client.host if request.client else None
+
+
+def _anonymous_allowed(request: Request) -> bool:
+    return guardrails.anonymous_allowed(_client_host(request), request.headers)
 
 
 def _get_role_from_request(request: Request) -> str:
-    keys = _parse_api_keys()
-    if not keys and not AUTH0_DOMAIN:
-        return "admin"
+    """
+    Resolve the caller's role, or raise 401.
+
+    Order: X-API-Key header → signed-in SSO session → anonymous access, which is
+    only granted when no authentication is configured AND the request comes
+    from this machine (or ALLOW_ANONYMOUS_ACCESS=true for a trusted lab).
+    """
     api_key = request.headers.get("X-API-Key", "")
-    role = keys.get(api_key)
-    if role:
-        return role
-    user = request.session.get("user") if hasattr(request, "session") else None
+    if api_key:
+        role = guardrails.role_for_api_key(api_key)
+        if role:
+            return role
+        raise HTTPException(status_code=401, detail="Invalid API key.")
+    user = request.session.get("user") if "session" in request.scope else None
     if user:
         return user.get("role", AUTH0_DEFAULT_ROLE)
-    raise HTTPException(status_code=403, detail="Invalid API key.")
+    if not guardrails.auth_configured(AUTH0_DOMAIN) and _anonymous_allowed(request):
+        return "admin"
+    if not guardrails.auth_configured(AUTH0_DOMAIN):
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required: configure NETCOPILOT_API_KEYS or Auth0 SSO "
+                   "(or ALLOW_ANONYMOUS_ACCESS=true on a trusted lab network).",
+        )
+    raise HTTPException(status_code=401, detail="Authentication required.")
+
+
+def _require_admin(request: Request) -> str:
+    role = _get_role_from_request(request)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return role
 
 
 def _parse_group_role_map() -> dict[str, str]:
@@ -498,7 +533,7 @@ def _resolve_user(request: Request, supplied: str) -> str:
         return str(session_user.get("email") or session_user.get("name"))
     supplied = (supplied or "unknown").strip()[:128] or "unknown"
     api_key = request.headers.get("X-API-Key", "")
-    if api_key and api_key in _parse_api_keys():
+    if api_key and guardrails.role_for_api_key(api_key):
         key_id = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:10]
         return f"apikey-{key_id}:{supplied}"
     return supplied
@@ -620,11 +655,11 @@ def _ticket_from_alert(alert: dict[str, Any], analysis: Optional[str] = None) ->
         description += "\n\nInvestigation summary:\n" + analysis
 
     return {
-        "ticket_type": JIRA_DEFAULT_ISSUE_TYPE,
+        "ticket_type": get_setting("JIRA_DEFAULT_ISSUE_TYPE", "Task"),
         "summary": summary,
         "description": description,
-        "team": JIRA_DEFAULT_TEAM,
-        "priority": JIRA_DEFAULT_PRIORITY,
+        "team": get_setting("JIRA_DEFAULT_TEAM", "NOC"),
+        "priority": get_setting("JIRA_DEFAULT_PRIORITY", "Medium"),
     }
 
 
@@ -653,8 +688,20 @@ def _redact_payload(payload: Any) -> Any:
     return payload
 
 
+_AUDIT_SKIP_PATHS = ("/health", "/version", "/static/", "/metrics", "/favicon")
+
+
 def _audit_log(payload: dict[str, Any]) -> None:
-    audit_logger.info(json.dumps(_redact_payload(payload), ensure_ascii=True))
+    payload = _redact_payload(payload)
+    audit_logger.info(json.dumps(payload, ensure_ascii=True, default=str))
+    if payload.get("event") == "http_request":
+        # Keep the persistent trail focused: writes, admin access, and anything denied/failed.
+        path = str(payload.get("path", ""))
+        if path.startswith(_AUDIT_SKIP_PATHS):
+            return
+        if payload.get("method") == "GET" and not path.startswith("/admin") and payload.get("status", 0) < 400:
+            return
+    audit.record(payload)
 
 
 # Imperative change requests ("configure ...", "please shut down ge-0/0/1").
@@ -706,22 +753,45 @@ def _get_llm_settings() -> dict[str, str]:
 # HTTP middleware
 # ---------------------------------------------------------------------------
 
+# Token/signature-authenticated webhooks are exempt from the browser origin check.
+_CSRF_EXEMPT_PREFIXES = ("/slack/", "/teams/", "/alerts/", "/webhooks/")
+
+
 @app.middleware("http")
 async def audit_http_requests(request: Request, call_next):
     start = time.time()
+    path = request.url.path
+    if (
+        request.method in ("POST", "PUT", "PATCH", "DELETE")
+        and not path.startswith(_CSRF_EXEMPT_PREFIXES)
+        and not request.headers.get("X-API-Key")
+        and request.cookies.get("session")
+    ):
+        # CSRF: a cookie-authenticated write must come from our own origin.
+        source = request.headers.get("origin") or request.headers.get("referer") or ""
+        if source and not guardrails.origin_is_allowed(source, request.headers.get("host", "")):
+            _audit_log({"event": "csrf_blocked", "path": path, "origin": source})
+            return JSONResponse({"detail": "Cross-origin request blocked."}, status_code=403)
+
     response = await call_next(request)
     duration_ms = int((time.time() - start) * 1000)
     user = None
-    if hasattr(request, "session") and request.session:
-        user = request.session.get("user", {}).get("email")
+    session_user = request.scope.get("session", {}).get("user") if "session" in request.scope else None
+    if session_user:
+        user = session_user.get("email")
+    elif request.headers.get("X-API-Key"):
+        user = "apikey-" + hashlib.sha256(request.headers["X-API-Key"].encode("utf-8")).hexdigest()[:10]
+    else:
+        user = f"anonymous@{_client_host(request)}"
     _audit_log(
         {
             "event": "http_request",
             "method": request.method,
-            "path": request.url.path,
+            "path": path,
             "status": response.status_code,
             "duration_ms": duration_ms,
             "user": user,
+            "client": _client_host(request),
         }
     )
     return response
@@ -734,13 +804,6 @@ async def audit_http_requests(request: Request, call_next):
 class ChatRequest(BaseModel):
     message: str
     user: str = "unknown"
-
-
-class TeamsWebhookRequest(BaseModel):
-    text: str
-    user: str = "teams"
-    from_: Optional[Any] = Field(default=None, alias="from")
-    token: Optional[str] = None
 
 
 class AlertIngestRequest(BaseModel):
@@ -770,6 +833,11 @@ def _compact_tool_result(result: Any) -> str:
     limit = max(2_000, get_setting_int("TOOL_RESULT_MAX_CHARS", _TOOL_RESULT_MAX_CHARS))
     if isinstance(result, dict) and "raw_output" in result and result.get("output") == result["raw_output"]:
         result = {k: v for k, v in result.items() if k != "raw_output"}
+    if get_setting_bool("REDACT_DEVICE_SECRETS", True):
+        result, redacted = redact_obj(result)
+        if redacted and isinstance(result, dict):
+            # Tell the model values were hidden so it doesn't conclude they are absent.
+            result["secrets_redacted"] = redacted
     text = json.dumps(result, default=str)
     if len(text) <= limit:
         return text
@@ -1051,15 +1119,15 @@ def _parse_ticket_command(text: str) -> Optional[dict]:
         parts = [p.strip() for p in remainder.split("|")]
         summary = parts[0] or "NetCopilot ticket"
         description = parts[1] if len(parts) > 1 and parts[1] else summary
-        team = parts[2] if len(parts) > 2 and parts[2] else JIRA_DEFAULT_TEAM
-        priority = parts[3] if len(parts) > 3 and parts[3] else JIRA_DEFAULT_PRIORITY
-        ticket_type = parts[4] if len(parts) > 4 and parts[4] else JIRA_DEFAULT_ISSUE_TYPE
+        team = parts[2] if len(parts) > 2 and parts[2] else get_setting("JIRA_DEFAULT_TEAM", "NOC")
+        priority = parts[3] if len(parts) > 3 and parts[3] else get_setting("JIRA_DEFAULT_PRIORITY", "Medium")
+        ticket_type = parts[4] if len(parts) > 4 and parts[4] else get_setting("JIRA_DEFAULT_ISSUE_TYPE", "Task")
     else:
         summary = remainder or "NetCopilot ticket"
         description = summary
-        team = JIRA_DEFAULT_TEAM
-        priority = JIRA_DEFAULT_PRIORITY
-        ticket_type = JIRA_DEFAULT_ISSUE_TYPE
+        team = get_setting("JIRA_DEFAULT_TEAM", "NOC")
+        priority = get_setting("JIRA_DEFAULT_PRIORITY", "Medium")
+        ticket_type = get_setting("JIRA_DEFAULT_ISSUE_TYPE", "Task")
 
     return {
         "ticket_type": ticket_type,
@@ -1141,14 +1209,28 @@ async def chat_reset(req: ChatResetRequest, request: Request):
     return {"status": "ok", "messages_removed": removed}
 
 
+def _verify_alert_token(request: Request) -> None:
+    """X-Alert-Token or 'Authorization: Bearer' (Alertmanager http_config) must match ALERT_INGEST_TOKEN."""
+    expected = get_setting("ALERT_INGEST_TOKEN", "")
+    presented = request.headers.get("X-Alert-Token", "")
+    auth = request.headers.get("Authorization", "")
+    if not presented and auth.lower().startswith("bearer "):
+        presented = auth[7:].strip()
+    if expected:
+        if not presented or not hmac.compare_digest(presented.encode("utf-8"), expected.encode("utf-8")):
+            raise HTTPException(status_code=403, detail="Invalid alert ingest token.")
+        return
+    if _anonymous_allowed(request):
+        return
+    raise HTTPException(status_code=503, detail="Alert ingest is not configured: set ALERT_INGEST_TOKEN.")
+
+
 @app.post("/alerts/ingest")
 async def ingest_alert(req: AlertIngestRequest, request: Request):
     _enforce_rate_limit(request.client.host if request.client else "alert-ingest")
-    token = request.headers.get("X-Alert-Token", "")
-    if ALERT_INGEST_TOKEN and token != ALERT_INGEST_TOKEN:
-        raise HTTPException(status_code=403, detail="Invalid alert ingest token.")
+    _verify_alert_token(request)
 
-    channel = req.channel or SLACK_ALERT_CHANNEL or "default"
+    channel = req.channel or get_setting("SLACK_ALERT_CHANNEL", "") or "default"
     _save_alert(channel, req.source, req.model_dump())
 
     slack_error = None
@@ -1165,51 +1247,163 @@ async def ingest_alert(req: AlertIngestRequest, request: Request):
     return {"status": "ok", "channel": channel, "slack_error": slack_error}
 
 
+# Background work that must outlive the request (kept referenced until done).
+_background_jobs: set[asyncio.Task] = set()
+
+
+def _keep_alive(task: asyncio.Task) -> None:
+    _background_jobs.add(task)
+    task.add_done_callback(_background_jobs.discard)
+
+
+def _verify_teams_request(request: Request, raw_body: bytes, body_token: str) -> None:
+    """
+    Teams outgoing webhooks sign each request: Authorization: HMAC <base64(HMAC-SHA256(body))>,
+    keyed with the base64-decoded security token shown when the webhook is created.
+    """
+    hmac_secret = get_setting("TEAMS_HMAC_SECRET", "")
+    if hmac_secret:
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("HMAC "):
+            raise HTTPException(status_code=401, detail="Missing Teams HMAC signature.")
+        try:
+            key = base64.b64decode(hmac_secret)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=500, detail="TEAMS_HMAC_SECRET is not valid base64.")
+        expected = base64.b64encode(hmac.new(key, raw_body, hashlib.sha256).digest()).decode("ascii")
+        if not hmac.compare_digest(expected, auth[5:].strip()):
+            raise HTTPException(status_code=401, detail="Invalid Teams HMAC signature.")
+        return
+    legacy = get_setting("TEAMS_VERIFICATION_TOKEN", "")
+    if legacy:
+        if not body_token or not hmac.compare_digest(body_token.encode(), legacy.encode()):
+            raise HTTPException(status_code=403, detail="Invalid Teams verification token.")
+        return
+    if _anonymous_allowed(request):
+        return
+    raise HTTPException(status_code=503, detail="Teams is not configured: set TEAMS_HMAC_SECRET.")
+
+
+_TEAMS_MENTION = re.compile(r"<at>.*?</at>", re.IGNORECASE | re.DOTALL)
+_HTML_TAG = re.compile(r"<[^>]+>")
+
+
+def _teams_text(raw: str) -> str:
+    """Strip the @mention and Teams HTML formatting from a message."""
+    text = _HTML_TAG.sub(" ", _TEAMS_MENTION.sub(" ", raw or ""))
+    return " ".join(html.unescape(text).split())
+
+
+async def _post_teams_result(task: asyncio.Task, url: str, question: str) -> None:
+    try:
+        reply = (await task)["reply"]
+    except Exception:
+        logger.exception("Teams background investigation failed.")
+        reply = "NetCopilot could not complete this request."
+    card = {
+        "type": "message",
+        "attachments": [{
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "content": {
+                "type": "AdaptiveCard",
+                "version": "1.4",
+                "body": [
+                    {"type": "TextBlock", "text": f"NetCopilot: {question[:200]}", "weight": "Bolder", "wrap": True},
+                    {"type": "TextBlock", "text": reply[:20000], "wrap": True},
+                ],
+            },
+        }],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(url, json=card)
+    except Exception:
+        logger.exception("Posting Teams result to TEAMS_RESULT_WEBHOOK_URL failed.")
+
+
 @app.post("/teams/webhook")
-async def teams_webhook(req: TeamsWebhookRequest):
+async def teams_webhook(request: Request):
+    """
+    Microsoft Teams outgoing webhook. Teams waits at most 5 seconds for the reply,
+    so longer investigations are acknowledged and the answer is posted to
+    TEAMS_RESULT_WEBHOOK_URL (a Teams Workflows "post to channel" webhook).
+    """
     _enforce_rate_limit("teams")
-    if TEAMS_VERIFICATION_TOKEN and req.token != TEAMS_VERIFICATION_TOKEN:
-        raise HTTPException(status_code=403, detail="Invalid Teams verification token.")
-    user = req.user
-    if isinstance(req.from_, dict):
-        user = req.from_.get("name") or req.from_.get("id") or user
-    elif isinstance(req.from_, str):
-        user = req.from_
-    result = await _run_chat(req.text, user, TEAMS_ROLE)
-    return {"type": "message", "text": result["reply"]}
+    raw_body = await request.body()
+    try:
+        body = json.loads(raw_body or b"{}")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid JSON.")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid JSON.")
+    _verify_teams_request(request, raw_body, str(body.get("token") or ""))
+
+    sender = body.get("from")
+    user = str(body.get("user") or "teams")
+    if isinstance(sender, dict):
+        user = str(sender.get("aadObjectId") or sender.get("name") or sender.get("id") or user)
+    elif isinstance(sender, str):
+        user = sender
+    text = _teams_text(str(body.get("text") or ""))
+    if not text:
+        return {"type": "message", "text": "Ask me about a device, e.g. \"BGP status on pe1\"."}
+
+    task = asyncio.create_task(_run_chat(text, f"teams:{user}", get_setting("TEAMS_ROLE", "noc")))
+    try:
+        result = await asyncio.wait_for(asyncio.shield(task), timeout=4.0)
+        return {"type": "message", "text": result["reply"]}
+    except asyncio.TimeoutError:
+        url = get_setting("TEAMS_RESULT_WEBHOOK_URL", "")
+        if url:
+            _keep_alive(asyncio.create_task(_post_teams_result(task, url, text)))
+            return {"type": "message", "text": "Investigating — the full answer will be posted to this channel shortly."}
+        _keep_alive(task)
+        return {
+            "type": "message",
+            "text": "Still investigating (Teams allows 5 seconds per reply). Ask \"what did you find?\" "
+                    "in a minute, or ask an admin to configure TEAMS_RESULT_WEBHOOK_URL.",
+        }
+
+
+def _verify_slack_request(request: Request, raw_body: bytes, legacy_token: str = "") -> None:
+    """
+    Verify a Slack request with the signing secret (HMAC-SHA256, 5-minute
+    replay window). The deprecated verification token is accepted only when no
+    signing secret is set; with neither, only anonymous-allowed clients pass.
+    """
+    secret = get_setting("SLACK_SIGNING_SECRET", "")
+    if secret:
+        timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+        signature = request.headers.get("X-Slack-Signature", "")
+        if not timestamp.isdigit() or abs(int(time.time()) - int(timestamp)) > 300:
+            raise HTTPException(status_code=403, detail="Slack request expired or unsigned.")
+        base = b"v0:" + timestamp.encode("utf-8") + b":" + raw_body
+        digest = hmac.new(secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(f"v0={digest}", signature):
+            raise HTTPException(status_code=403, detail="Invalid Slack signature.")
+        return
+    verification = get_setting("SLACK_VERIFICATION_TOKEN", "")
+    if verification:
+        if not legacy_token or not hmac.compare_digest(legacy_token.encode(), verification.encode()):
+            raise HTTPException(status_code=403, detail="Invalid Slack verification token.")
+        return
+    if _anonymous_allowed(request):
+        return
+    raise HTTPException(status_code=503, detail="Slack is not configured: set SLACK_SIGNING_SECRET.")
 
 
 @app.post("/slack/command")
 async def slack_command(request: Request, background_tasks: BackgroundTasks):
     _enforce_rate_limit("slack")
     raw_body = await request.body()
-    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
-    signature = request.headers.get("X-Slack-Signature", "")
-
-    if SLACK_SIGNING_SECRET:
-        if not timestamp.isdigit():
-            raise HTTPException(status_code=403, detail="Invalid Slack signature.")
-        if abs(int(time.time()) - int(timestamp)) > 300:
-            raise HTTPException(status_code=403, detail="Slack request expired.")
-        base = f"v0:{timestamp}:{raw_body.decode('utf-8')}"
-        digest = hmac.new(
-            SLACK_SIGNING_SECRET.encode("utf-8"),
-            base.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(f"v0={digest}", signature):
-            raise HTTPException(status_code=403, detail="Invalid Slack signature.")
-
     form = parse_qs(raw_body.decode("utf-8"))
     token = (form.get("token") or [""])[0]
+    _verify_slack_request(request, raw_body, legacy_token=token)
     user_name = (form.get("user_name") or ["slack"])[0]
     text = (form.get("text") or [""])[0]
     response_url = (form.get("response_url") or [""])[0]
     channel_id = (form.get("channel_id") or [""])[0]
     channel_name = (form.get("channel_name") or [""])[0]
-
-    if SLACK_VERIFICATION_TOKEN and token != SLACK_VERIFICATION_TOKEN and not SLACK_SIGNING_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid Slack verification token.")
 
     ticket_payload = _parse_ticket_command(text)
     if ticket_payload and ticket_payload.get("summary") == "NetCopilot ticket":
@@ -1244,7 +1438,7 @@ async def slack_command(request: Request, background_tasks: BackgroundTasks):
                         reply_text = "No recent alert found for this channel."
                     else:
                         result = await _run_chat(
-                            f"Investigate alert: {investigate_text}", user_name, SLACK_ROLE,
+                            f"Investigate alert: {investigate_text}", user_name, get_setting("SLACK_ROLE", "noc"),
                             check_config=False,
                         )
                         reply_text = result["reply"]
@@ -1270,10 +1464,10 @@ async def slack_command(request: Request, background_tasks: BackgroundTasks):
                             f"description={ticket_payload.get('description', '')}, "
                             f"priority={ticket_payload.get('priority', 'Medium')}."
                         )
-                    ticket_result = await _run_chat(ticket_prompt, user_name, SLACK_ROLE, check_config=False)
+                    ticket_result = await _run_chat(ticket_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False)
                     reply_text = ticket_result.get("reply", "Ticket creation failed.")
                 else:
-                    result = await _run_chat(text, user_name, SLACK_ROLE)
+                    result = await _run_chat(text, user_name, get_setting("SLACK_ROLE", "noc"))
                     reply_text = result["reply"]
             except Exception:
                 logger.exception("Slack async response failed.")
@@ -1299,7 +1493,7 @@ async def slack_command(request: Request, background_tasks: BackgroundTasks):
         if not investigate_text.strip():
             return {"response_type": "ephemeral", "text": "No recent alert found for this channel."}
         result = await _run_chat(
-            f"Investigate alert: {investigate_text}", user_name, SLACK_ROLE, check_config=False
+            f"Investigate alert: {investigate_text}", user_name, get_setting("SLACK_ROLE", "noc"), check_config=False
         )
         return {"response_type": "in_channel", "text": result["reply"]}
 
@@ -1315,7 +1509,7 @@ async def slack_command(request: Request, background_tasks: BackgroundTasks):
             "text": f"Ticket created: {ticket_result.get('ticket_id')} {ticket_result.get('ticket_url', '')}".strip(),
         }
 
-    result = await _run_chat(text, user_name, SLACK_ROLE)
+    result = await _run_chat(text, user_name, get_setting("SLACK_ROLE", "noc"))
     return {"response_type": "in_channel", "text": result["reply"]}
 
 
@@ -1340,37 +1534,22 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
 
     _enforce_rate_limit("slack-actions")
 
-    # Verify Slack signature
-    signature = request.headers.get("X-Slack-Signature", "")
-    timestamp  = request.headers.get("X-Slack-Request-Timestamp", "")
-    if SLACK_SIGNING_SECRET:
-        if not timestamp.isdigit() or abs(int(time.time()) - int(timestamp)) > 300:
-            raise HTTPException(status_code=403, detail="Slack request expired.")
-        try:
-            digest = hmac.new(
-                SLACK_SIGNING_SECRET.encode("utf-8"),
-                f"v0:{timestamp}:{raw_str}".encode("utf-8"),
-                hashlib.sha256,
-            ).hexdigest()
-            if not hmac.compare_digest(f"v0={digest}", signature):
-                raise HTTPException(status_code=403, detail="Invalid Slack signature.")
-        except HTTPException:
-            raise
-        except Exception:
-            raise HTTPException(status_code=403, detail="Signature verification failed.")
-
     form = parse_qs(raw_str)
     payload_str = (form.get("payload") or ["{}"])[0]
     try:
         payload = json.loads(payload_str)
     except Exception:
+        payload = None
+    legacy_token = payload.get("token", "") if isinstance(payload, dict) else ""
+    _verify_slack_request(request, raw_body, legacy_token=legacy_token)
+    if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid payload JSON.")
 
     actions      = payload.get("actions", [])
     user_info    = payload.get("user", {})
     user_name    = user_info.get("username") or user_info.get("name") or "slack"
     response_url = payload.get("response_url", "")
-    channel      = (payload.get("channel") or {}).get("id", "") or SLACK_ALERT_CHANNEL or "default"
+    channel      = (payload.get("channel") or {}).get("id", "") or get_setting("SLACK_ALERT_CHANNEL", "") or "default"
 
     if not actions:
         return JSONResponse({"ok": True})
@@ -1406,7 +1585,7 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                     f"cisco_get_interface_status, cisco_get_interface_counters for Cisco devices. "
                     f"Alert details: {context}"
                 )
-                result = await _run_chat(inv_prompt, user_name, SLACK_ROLE, check_config=False)
+                result = await _run_chat(inv_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False)
                 reply_text = result["reply"]
                 _save_alert(channel, "analysis", {"analysis": reply_text})
 
@@ -1463,7 +1642,7 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                     inv_result = await _run_chat(
                         f"Investigate this alert. Call vendor device tools DIRECTLY — "
                         f"do NOT use run_playbook. Alert details: {context}",
-                        user_name, SLACK_ROLE, check_config=False,
+                        user_name, get_setting("SLACK_ROLE", "noc"), check_config=False,
                     )
                     _save_alert(channel, "analysis", {"analysis": inv_result["reply"]})
                     ticket_prompt = (
@@ -1478,7 +1657,7 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                         f"Fill the description with all investigation findings, evidence, severity, and next steps."
                     )
 
-                result = await _run_chat(ticket_prompt, user_name, SLACK_ROLE, check_config=False)
+                result = await _run_chat(ticket_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False)
                 reply_text = result.get("reply", "Ticket creation failed.")
         except Exception:
             logger.exception("Slack action handler failed.")
@@ -1566,8 +1745,25 @@ async def index():
 
 @app.get("/auth/me")
 async def auth_me(request: Request):
-    user = request.session.get("user") if hasattr(request, "session") else None
-    return {"user": user}
+    """Who am I, and how should the UI authenticate? Never raises."""
+    user = request.session.get("user") if "session" in request.scope else None
+    if AUTH0_DOMAIN:
+        mode = "auth0"
+    elif guardrails.api_keys():
+        mode = "api_key"
+    else:
+        mode = "anonymous"
+    try:
+        role: Optional[str] = _get_role_from_request(request)
+    except HTTPException:
+        role = None
+    return {
+        "user": user,
+        "role": role,
+        "authenticated": role is not None,
+        "auth_mode": mode,
+        "guardrails_locked": guardrails_locked(),
+    }
 
 
 @app.get("/auth/login")
@@ -1625,11 +1821,14 @@ async def auth_callback(request: Request):
         "name": userinfo.get("name"),
         "role": role,
     }
+    _audit_log({"event": "login", "user": userinfo.get("email"), "role": role})
     return RedirectResponse(url="/")
 
 
 @app.get("/auth/logout")
 async def auth_logout(request: Request):
+    user = (request.session.get("user") or {}).get("email") if "session" in request.scope else None
+    _audit_log({"event": "logout", "user": user})
     request.session.clear()
     query = urlencode({"returnTo": AUTH0_LOGOUT_URL, "client_id": AUTH0_CLIENT_ID})
     return RedirectResponse(url=f"https://{AUTH0_DOMAIN}/v2/logout?{query}")
@@ -1641,9 +1840,7 @@ async def auth_logout(request: Request):
 
 @app.get("/admin/settings")
 async def admin_settings(request: Request):
-    role = _get_role_from_request(request)
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required.")
+    _require_admin(request)
     schema = []
     for entry in _SETTINGS_SCHEMA:
         key = entry["key"]
@@ -1658,6 +1855,7 @@ async def admin_settings(request: Request):
                 "has_value": bool(raw_value),
                 "value": "" if is_secret else raw_value,
                 "restart_required": True,
+                "locked": guardrails_locked() and key in GUARDRAIL_KEYS,
             }
         )
     return {
@@ -1672,9 +1870,7 @@ async def admin_settings(request: Request):
 
 @app.post("/admin/settings")
 async def update_admin_settings(request: Request):
-    role = _get_role_from_request(request)
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required.")
+    _require_admin(request)
     payload = await request.json()
     values = payload.get("settings") if isinstance(payload, dict) else None
     if not isinstance(values, dict):
@@ -1694,16 +1890,63 @@ async def update_admin_settings(request: Request):
     if not filtered:
         return {"status": "ok", "updated": [], "restart_required": False}
 
-    set_settings(filtered)
+    try:
+        set_settings(filtered)
+    except LockedSettingError as exc:
+        _audit_log({"event": "admin_settings_denied", "keys": sorted(filtered.keys()), "reason": str(exc)})
+        raise HTTPException(status_code=403, detail=str(exc))
     _audit_log({"event": "admin_settings_update", "keys": sorted(filtered.keys())})
     return {"status": "ok", "updated": list(filtered.keys()), "restart_required": True}
 
 
+@app.get("/admin/security-posture")
+async def admin_security_posture(request: Request):
+    """Guardrail checklist for admins and security reviewers."""
+    _require_admin(request)
+    checks = guardrails.posture_report(AUTH0_DOMAIN)
+    summary = {status: sum(1 for c in checks if c["status"] == status) for status in ("pass", "warn", "fail", "info")}
+    return {"summary": summary, "checks": checks, "version": APP_VERSION}
+
+
+@app.get("/admin/audit")
+async def admin_audit(
+    request: Request,
+    event: Optional[str] = None,
+    user: Optional[str] = None,
+    hours: float = 24,
+    limit: int = 200,
+):
+    _require_admin(request)
+    since = time.time() - hours * 3600 if hours > 0 else None
+    return {"events": audit.query(event=event or None, user=user or None, since=since, limit=limit)}
+
+
+@app.get("/admin/audit.csv")
+async def admin_audit_csv(request: Request, hours: float = 24 * 30, limit: int = 5000):
+    _require_admin(request)
+    since = time.time() - hours * 3600 if hours > 0 else None
+    rows = audit.query(since=since, limit=limit)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["id", "time_utc", "event", "user", "role", "detail"])
+    for r in rows:
+        writer.writerow([
+            r["id"],
+            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(r["ts"])),
+            r["event"], r["user"] or "", r["role"] or "",
+            json.dumps(r["detail"], ensure_ascii=True),
+        ])
+    _audit_log({"event": "audit_export", "rows": len(rows)})
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=netcopilot-audit.csv"},
+    )
+
+
 @app.post("/admin/reload-inventory")
 async def reload_inventory(request: Request):
-    role = _get_role_from_request(request)
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required.")
+    _require_admin(request)
     counts = await asyncio.to_thread(reload_inventory_devices)
     _audit_log({"event": "admin_inventory_reload", "counts": counts})
     return {"status": "ok", "counts": counts}
@@ -1711,9 +1954,7 @@ async def reload_inventory(request: Request):
 
 @app.get("/admin/inventory")
 async def admin_inventory(request: Request):
-    role = _get_role_from_request(request)
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required.")
+    _require_admin(request)
     devices = list_devices_detailed()
     counts: dict[str, int] = {}
     for device in devices:
@@ -1764,9 +2005,7 @@ async def import_inventory_csv(request: Request, file: UploadFile):
     Columns: device|name|hostname, vendor|platform, ip|host|address, and
     optionally port, platform, site. Existing devices not in the CSV are kept.
     """
-    role = _get_role_from_request(request)
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required.")
+    _require_admin(request)
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Please upload a CSV file.")
 
@@ -1880,17 +2119,13 @@ async def import_inventory_csv(request: Request, file: UploadFile):
 
 @app.get("/admin/playbooks")
 async def admin_playbooks(request: Request):
-    role = _get_role_from_request(request)
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required.")
+    _require_admin(request)
     return {"status": "ok", "playbooks": list_playbooks()}
 
 
 @app.post("/admin/playbooks")
 async def update_playbooks(request: Request):
-    role = _get_role_from_request(request)
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required.")
+    _require_admin(request)
     payload = await request.json()
     items = payload.get("playbooks") if isinstance(payload, dict) else None
     if not isinstance(items, list):
@@ -1902,9 +2137,7 @@ async def update_playbooks(request: Request):
 
 @app.delete("/admin/playbooks/{playbook_id}")
 async def delete_playbook_endpoint(playbook_id: str, request: Request):
-    role = _get_role_from_request(request)
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required.")
+    _require_admin(request)
     removed = delete_playbook(playbook_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Playbook not found.")
@@ -1915,9 +2148,7 @@ async def delete_playbook_endpoint(playbook_id: str, request: Request):
 @app.post("/admin/playbooks/test-step")
 async def test_playbook_step(request: Request):
     """Run a single playbook step with the given inputs (Admin UI "Test step")."""
-    role = _get_role_from_request(request)
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required.")
+    _require_admin(request)
     payload = await request.json()
     step = payload.get("step") if isinstance(payload, dict) else None
     inputs = payload.get("inputs") if isinstance(payload, dict) else None

@@ -17,8 +17,6 @@ kubectl apply -f deploy/k8s/prod/pvc.yaml
 kubectl apply -f deploy/k8s/prod/serviceaccount.yaml
 kubectl apply -f deploy/k8s/prod/deployment.yaml
 kubectl apply -f deploy/k8s/prod/service.yaml
-kubectl apply -f deploy/k8s/prod/pdb.yaml
-kubectl apply -f deploy/k8s/prod/hpa.yaml
 kubectl apply -f deploy/k8s/prod/networkpolicy.yaml
 kubectl apply -f deploy/k8s/prod/ingress.yaml
 ```
@@ -35,9 +33,16 @@ kubectl apply -f deploy/k8s/prod/devices-configmap.yaml
 ```
 Then call:
 ```bash
-curl -sS -X POST https://netcopilot.example.com/admin/reload-inventory
+curl -sS -X POST -H "X-API-Key: $NETCOPILOT_ADMIN_KEY" https://netcopilot.example.com/admin/reload-inventory
 ```
 
 ## Notes
 - This assumes an ingress controller (e.g., nginx) and a TLS secret.
-- For production, use external secret manager and external DB (Postgres).
+- Single replica with `Recreate` rollouts: state (settings, audit trail,
+  investigation history) is SQLite on a ReadWriteOnce volume. Running more
+  replicas requires moving that state to an external database first.
+- Guardrails are locked (`NETCOPILOT_LOCK_GUARDRAILS=true`): security settings
+  come only from the ConfigMap/Secret and cannot be changed in the Admin UI.
+- The container runs with a read-only root filesystem; writable paths are the
+  data volume (`/app/data`) and `/tmp`. Keep `LOG_TO_FILE` unset (logs go to stdout).
+- Review the Admin → Posture page after deploying; it lists any guardrail still off.

@@ -23,6 +23,7 @@ from credentials import get_secret
 from adapters.devices.registry import resolve_host
 from adapters.devices.pool import get_pool, CircuitOpenError
 from adapters.devices.safety import UnsafeInputError, validate_cli_command
+from adapters.devices.ssh_options import junos_host_key_params
 
 logger = logging.getLogger("netcopilot.adapters.junos")
 
@@ -124,6 +125,7 @@ def _connect(device_name: str):
         auto_probe=0,
         gather_facts=False,
         conn_open_timeout=timeout,
+        **junos_host_key_params(),
     )
     try:
         dev.open(auto_probe=0)

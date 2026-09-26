@@ -59,6 +59,21 @@ services:
       AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
       SESSION_SECRET: ${SESSION_SECRET}
+      # Access control: set API keys (key:role,...) or Auth0. Requests reach the
+      # container from the Docker bridge, so without either the app refuses them
+      # unless ALLOW_ANONYMOUS_ACCESS=true (trusted lab only).
+      NETCOPILOT_API_KEYS: ${NETCOPILOT_API_KEYS:-}
+      ALLOW_ANONYMOUS_ACCESS: ${ALLOW_ANONYMOUS_ACCESS:-false}
+      NETCOPILOT_ENCRYPTION_KEY: ${NETCOPILOT_ENCRYPTION_KEY:-}
+      NETCOPILOT_LOCK_GUARDRAILS: ${NETCOPILOT_LOCK_GUARDRAILS:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      REDACT_DEVICE_SECRETS: ${REDACT_DEVICE_SECRETS:-true}
+      SSH_STRICT_HOST_KEY_CHECKING: ${SSH_STRICT_HOST_KEY_CHECKING:-false}
+      ALERT_INGEST_TOKEN: ${ALERT_INGEST_TOKEN:-}
+      TEAMS_HMAC_SECRET: ${TEAMS_HMAC_SECRET:-}
+      TEAMS_RESULT_WEBHOOK_URL: ${TEAMS_RESULT_WEBHOOK_URL:-}
+      ARUBA_USER: ${ARUBA_USER:-}
+      ARUBA_PASS: ${ARUBA_PASS:-}
       # Integrations (direct in-process adapters — no MCP servers needed)
       JIRA_BASE_URL: ${JIRA_BASE_URL}
       JIRA_EMAIL: ${JIRA_EMAIL}

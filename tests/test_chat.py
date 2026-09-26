@@ -133,7 +133,7 @@ def test_chat_reset_forgets_history(monkeypatch):
 
 
 def test_api_key_callers_get_namespaced_memory(monkeypatch):
-    monkeypatch.setattr(appmod, "NETCOPILOT_API_KEYS", "k1:noc,k2:noc")
+    monkeypatch.setenv("NETCOPILOT_API_KEYS", "k1:noc,k2:noc")
 
     class _Req:
         scope: dict = {}

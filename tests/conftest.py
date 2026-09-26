@@ -20,7 +20,10 @@ os.environ["DEVICE_REGISTRY_PATH"] = DEVICES_YAML
 os.environ["OPENAI_API_KEY"] = "sk-test"
 os.environ["LLM_PROVIDER"] = "openai"
 os.environ["JIRA_MCP_URL"] = "http://127.0.0.1:9/sse"  # nothing listens there — fails fast
-for key in ("NETBOX_URL", "NAUTOBOT_URL", "NETCOPILOT_API_KEYS", "AUTH0_DOMAIN"):
+# TestClient's peer is "testclient", not loopback; auth-specific tests turn this off.
+os.environ["ALLOW_ANONYMOUS_ACCESS"] = "true"
+for key in ("NETBOX_URL", "NAUTOBOT_URL", "NETCOPILOT_API_KEYS", "AUTH0_DOMAIN",
+            "NETCOPILOT_LOCK_GUARDRAILS", "NETCOPILOT_ENCRYPTION_KEY", "SESSION_SECRET"):
     os.environ.pop(key, None)
 for key, value in {
     "CISCO_USER": "u", "CISCO_PASS": "p",

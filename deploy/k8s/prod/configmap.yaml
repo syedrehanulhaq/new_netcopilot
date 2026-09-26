@@ -12,6 +12,14 @@ data:
   DEVICE_REGISTRY_PATH: "/app/devices.yaml"
   LLM_PROVIDER: "openai"
   OPENAI_MODEL: "gpt-4.1-mini"
+  # Guardrails (locked: NETCOPILOT_LOCK_GUARDRAILS=true in the Deployment)
+  REDACT_DEVICE_SECRETS: "true"
+  AUDIT_RETENTION_DAYS: "365"
+  SESSION_MAX_AGE_HOURS: "12"
+  ENABLE_API_DOCS: "false"
+  # Mount a known_hosts file for device SSH, then enable:
+  SSH_STRICT_HOST_KEY_CHECKING: "false"
+  # SSH_KNOWN_HOSTS_FILE: "/etc/netcopilot/known_hosts"
   # LOCAL_LLM_BASE_URL: "http://litellm:4000/v1"
   # LOCAL_LLM_MODEL: "claude-haiku"
   # PROMETHEUS_URL: "http://prometheus.monitoring:9090"

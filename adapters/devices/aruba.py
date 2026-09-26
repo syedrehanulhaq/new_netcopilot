@@ -30,6 +30,7 @@ from adapters.devices.registry import resolve_host, get_device_info
 from adapters.devices.pool import get_pool, CircuitOpenError
 from adapters.devices.safety import UnsafeInputError, reject_control_chars, validate_cli_command
 from adapters.devices.ssh_cache import SSHSessionCache
+from adapters.devices.ssh_options import netmiko_host_key_params
 
 logger = logging.getLogger("netcopilot.adapters.aruba")
 
@@ -72,6 +73,7 @@ def _connect(device_name: str):
     }
     if port:
         params["port"] = port
+    params.update(netmiko_host_key_params())
     return ConnectHandler(**params)
 
 

@@ -7,6 +7,8 @@ metadata:
 
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate  # the SQLite volume is ReadWriteOnce
   selector:
     matchLabels:
       app: {{ include "netcopilot.name" . }}
@@ -16,16 +18,29 @@ spec:
         app: {{ include "netcopilot.name" . }}
     spec:
       serviceAccountName: {{ default (include "netcopilot.fullname" .) .Values.serviceAccount.name }}
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
         fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: netcopilot
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: 8001
+          env:
+            - name: NETCOPILOT_DATA_DIR
+              value: /app/data
+            - name: NETCOPILOT_LOCK_GUARDRAILS
+              value: "true"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           envFrom:
             - configMapRef:
                 name: {{ include "netcopilot.fullname" . }}-config
@@ -34,6 +49,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
             - name: devices
               mountPath: /app/devices.yaml
               subPath: devices.yaml
@@ -45,7 +62,7 @@ spec:
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /version
               port: 8001
             initialDelaySeconds: 10
             periodSeconds: 20
@@ -59,6 +76,8 @@ spec:
 {{- else }}
           emptyDir: {}
 {{- end }}
+        - name: tmp
+          emptyDir: {}
         - name: devices
           configMap:
             name: {{ include "netcopilot.fullname" . }}-devices

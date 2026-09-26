@@ -3,7 +3,8 @@ image:
   tag: prod
   pullPolicy: IfNotPresent
 
-replicaCount: 2
+# SQLite state on a ReadWriteOnce volume: exactly one replica (see templates/deployment.yaml)
+replicaCount: 1
 
 service:
   type: ClusterIP
@@ -36,6 +37,10 @@ persistence:
   storageClassName: ""
 
 config:
+  REDACT_DEVICE_SECRETS: "true"
+  AUDIT_RETENTION_DAYS: "365"
+  ENABLE_API_DOCS: "false"
+  SSH_STRICT_HOST_KEY_CHECKING: "false"  # set true once a known_hosts file is mounted
   LOG_LEVEL: INFO
   RATE_LIMIT_PER_MIN: "120"
   DEVICE_REGISTRY_PATH: /app/devices.yaml
@@ -43,6 +48,9 @@ config:
   OPENAI_MODEL: gpt-4.1-mini
 
 secrets:
+  NETCOPILOT_API_KEYS: ""        # "key:admin,key2:noc" — or configure Auth0 SSO
+  NETCOPILOT_ENCRYPTION_KEY: ""  # Fernet key for credentials saved in the Admin UI
+  TEAMS_HMAC_SECRET: ""
   OPENAI_API_KEY: ""
   CISCO_USER: ""
   CISCO_PASS: ""
@@ -69,13 +77,13 @@ inventory:
   nokia_devices: {}
 
 hpa:
-  enabled: true
+  enabled: false  # requires external state (Postgres) before scaling out
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
 
 pdb:
-  enabled: true
+  enabled: false  # a PDB on a single replica blocks node drains
   minAvailable: 1
 
 networkPolicy:
