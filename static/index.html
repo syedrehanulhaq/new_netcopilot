@@ -74,7 +74,12 @@
             </div>
             <button id="history-close" class="settings-close">Close</button>
           </div>
-          <input id="history-search" type="search" placeholder="Search questions and answers" />
+          <div class="history-tools">
+            <input id="history-search" type="search" placeholder="Search questions and answers" />
+            <label id="history-all-label" class="history-all" hidden>
+              <input id="history-all" type="checkbox" /> All users (incl. automatic alert investigations)
+            </label>
+          </div>
           <div class="history-shell">
             <div id="history-list" class="history-list"></div>
             <div id="history-detail" class="history-detail"></div>

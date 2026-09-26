@@ -20,3 +20,5 @@ docs/
 .github/
 tests/
 requirements-dev.txt
+.settings.key
+.session_secret

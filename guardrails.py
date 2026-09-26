@@ -111,12 +111,21 @@ def allowed_origins() -> set[str]:
     return {o.strip().rstrip("/").lower() for o in get_setting("ALLOWED_ORIGINS", "").split(",") if o.strip()}
 
 
-def origin_is_allowed(origin_or_referer: str, host_header: str) -> bool:
+def origin_is_allowed(origin_or_referer: str, host_header: str, forwarded_host: str = "") -> bool:
+    """
+    Same-origin check. X-Forwarded-Host (set by reverse proxies that rewrite Host)
+    is also accepted: a cross-site page cannot make a browser send that header
+    without a CORS preflight, which NetCopilot never approves.
+    """
     parts = urlsplit(origin_or_referer)
     if not parts.scheme or not parts.netloc:
         return False
     origin = f"{parts.scheme}://{parts.netloc}".lower()
-    if parts.netloc.lower() == (host_header or "").lower():
+    netloc = parts.netloc.lower()
+    if netloc == (host_header or "").lower():
+        return True
+    forwarded = [h.strip().lower() for h in (forwarded_host or "").split(",") if h.strip()]
+    if netloc in forwarded:
         return True
     return origin in allowed_origins()
 

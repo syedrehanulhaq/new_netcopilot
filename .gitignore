@@ -34,3 +34,7 @@ data/
 .idea/
 .vscode/
 *.swp
+
+# Generated secrets (encryption key / session secret) — never commit or bake into images
+.settings.key
+.session_secret

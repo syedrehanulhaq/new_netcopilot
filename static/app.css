@@ -963,9 +963,24 @@ header {
   text-align: left;
 }
 
-.history-panel #history-search {
-  width: 100%;
+.history-tools {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
   margin: 8px 0 12px;
+}
+
+.history-all {
+  font-size: 12px;
+  color: #475569;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.history-panel #history-search {
+  flex: 1 1 280px;
   padding: 10px 14px;
   border-radius: 12px;
   border: 1px solid rgba(26, 142, 242, 0.25);

@@ -183,6 +183,15 @@ def test_cross_origin_cookie_writes_are_blocked(client):
     client.cookies.clear()
 
 
+def test_origin_check_behind_a_host_rewriting_proxy(client):
+    client.cookies.set("session", "anything")
+    headers = {"Origin": "https://netcopilot.example.com", "X-Forwarded-Host": "netcopilot.example.com"}
+    assert client.post("/chat/reset", json={"user": "u"}, headers=headers).status_code == 200
+    spoofed = {"Origin": "https://evil.example", "X-Forwarded-Host": "netcopilot.example.com"}
+    assert client.post("/chat/reset", json={"user": "u"}, headers=spoofed).status_code == 403
+    client.cookies.clear()
+
+
 def test_security_headers(client):
     r = client.get("/")
     csp = r.headers["content-security-policy"]

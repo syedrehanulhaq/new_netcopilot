@@ -231,11 +231,20 @@ def find_device(identifier: str) -> Optional[str]:
     for candidate in candidates:
         if candidate in names:
             return names[candidate]
+    port = ident.split(":", 1)[1] if ident.count(":") == 1 else ""
     for candidate in candidates:
-        for name, info in reg.items():
-            host = str(info.get("host", "")).lower()
-            if host and (host == candidate or host.split(".", 1)[0] == candidate):
-                return name
+        matches = [
+            name for name, info in reg.items()
+            if str(info.get("host", "")).lower() in (candidate,)
+            or str(info.get("host", "")).lower().split(".", 1)[0] == candidate
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            # Several devices behind one address (port-mapped lab / NAT): only a port
+            # match is conclusive — never guess, a wrong device means a wrong diagnosis.
+            by_port = [n for n in matches if port and str(reg[n].get("port") or "") == port]
+            return by_port[0] if len(by_port) == 1 else None
     for candidate in candidates:       # inventory names that are FQDNs themselves
         for lname, real in names.items():
             if lname.split(".", 1)[0] == candidate:

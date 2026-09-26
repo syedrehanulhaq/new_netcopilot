@@ -469,6 +469,8 @@ const historyOverlay = document.getElementById("history-overlay");
 const historyList = document.getElementById("history-list");
 const historyDetail = document.getElementById("history-detail");
 const historySearch = document.getElementById("history-search");
+const historyAll = document.getElementById("history-all");
+const historyAllLabel = document.getElementById("history-all-label");
 
 function metaText(text) {
   const span = document.createElement("span");
@@ -486,6 +488,7 @@ function badge(text, cls) {
 async function loadHistoryList() {
   historyList.textContent = "Loading…";
   const params = new URLSearchParams({ user: chatUserId(), q: historySearch.value.trim(), limit: "100" });
+  if (isAdmin && historyAll.checked) params.set("scope", "all");
   try {
     const data = await (await apiFetch(`/investigations?${params}`)).json();
     const items = data.investigations || [];
@@ -503,6 +506,7 @@ async function loadHistoryList() {
       const meta = document.createElement("div");
       meta.className = "history-meta";
       meta.append(metaText(new Date(item.created_at * 1000).toLocaleString()), badge(item.source));
+      if (isAdmin && historyAll.checked) meta.append(metaText(item.user));
       if (item.severity) meta.append(badge(item.severity, `sev-${item.severity.toLowerCase()}`));
       if (item.ticket) meta.append(badge("ticket", "sev-info"));
       if (item.status === "error") meta.append(badge("error", "sev-critical"));
@@ -555,6 +559,7 @@ async function showInvestigation(id) {
 }
 
 function openHistory(id) {
+  historyAllLabel.hidden = !isAdmin;
   historyOverlay.hidden = false;
   historyOverlay.classList.add("is-open");
   loadHistoryList();
@@ -573,6 +578,7 @@ historyOverlay.addEventListener("click", (event) => {
   if (event.target === historyOverlay) closeHistory();
 });
 let historySearchTimer;
+historyAll.addEventListener("change", loadHistoryList);
 historySearch.addEventListener("input", () => {
   clearTimeout(historySearchTimer);
   historySearchTimer = setTimeout(loadHistoryList, 250);

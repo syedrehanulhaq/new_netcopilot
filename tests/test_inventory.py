@@ -60,3 +60,19 @@ def test_csv_import_merges_without_deleting_existing_devices():
     assert saved["new-xr"] == {"host": "10.9.9.9", "vendor": "cisco", "platform": "iosxr", "site": "lab"}
     # live registry updated without a restart
     assert get_vendor("new-sw") == "aruba"
+
+
+def test_find_device_never_guesses_between_devices_sharing_an_address():
+    from adapters.devices import registry
+    from conftest import write_devices
+
+    write_devices({"devices": {
+        "pe1": {"host": "192.0.2.10", "port": 33045, "vendor": "junos"},
+        "p5": {"host": "192.0.2.10", "port": 33033, "vendor": "junos"},
+        "xr1": {"host": "192.0.2.20", "vendor": "cisco"},
+    }})
+    registry.reload_registry()
+    assert registry.find_device("192.0.2.20:9116") == "xr1"      # unique address
+    assert registry.find_device("192.0.2.10:9116") is None       # ambiguous → no guess
+    assert registry.find_device("192.0.2.10:33033") == "p5"      # port disambiguates
+    assert registry.find_device("PE1.lab.example.net") == "pe1"  # FQDN → short name

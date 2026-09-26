@@ -782,7 +782,9 @@ async def audit_http_requests(request: Request, call_next):
     ):
         # CSRF: a cookie-authenticated write must come from our own origin.
         source = request.headers.get("origin") or request.headers.get("referer") or ""
-        if source and not guardrails.origin_is_allowed(source, request.headers.get("host", "")):
+        if source and not guardrails.origin_is_allowed(
+            source, request.headers.get("host", ""), request.headers.get("x-forwarded-host", "")
+        ):
             _audit_log({"event": "csrf_blocked", "path": path, "origin": source})
             return JSONResponse({"detail": "Cross-origin request blocked."}, status_code=403)
 
