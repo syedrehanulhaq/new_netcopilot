@@ -24,6 +24,11 @@ Jira tickets. An LLM decides which diagnostics to run and summarises the evidenc
 | NetCopilot → Prometheus / Loki | outbound HTTPS | read queries | |
 | NetCopilot → Slack / Teams | outbound HTTPS | answers, alert messages | |
 
+With OpenAI, requests use the Responses API with `store: false` (OpenAI does not keep the
+conversation for later retrieval; reasoning between tool calls is carried as encrypted content
+returned to NetCopilot). Provider-side abuse-monitoring retention still follows your OpenAI
+data-control settings.
+
 With Anthropic's Opus 5.x / Fable 5.x models, a request the model declines under its safety
 policy (e.g. a false positive on network-security wording) is re-run by the API on another
 Anthropic model — same provider and data path (`ANTHROPIC_FALLBACK=off` disables this).

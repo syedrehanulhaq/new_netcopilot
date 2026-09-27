@@ -236,6 +236,7 @@ _SETTINGS_SCHEMA = [
     {"key": "OPENAI_MODEL", "label": "OpenAI model", "category": "LLM"},
     {"key": "OPENAI_REASONING_EFFORT", "label": "OpenAI reasoning effort: none / low / medium / high / xhigh / max (blank = model default)", "category": "LLM"},
     {"key": "OPENAI_MAX_COMPLETION_TOKENS", "label": "OpenAI max completion tokens (blank = model default)", "category": "LLM"},
+    {"key": "OPENAI_API_MODE", "label": "OpenAI API: responses (required for GPT-5.x tool use) / chat", "category": "LLM"},
     {"key": "ANTHROPIC_API_KEY", "label": "Anthropic API key", "category": "LLM", "secret": True},
     {"key": "ANTHROPIC_MODEL", "label": "Anthropic model", "category": "LLM"},
     {"key": "ANTHROPIC_WORKSPACE_ID", "label": "Anthropic workspace ID (only for keys not scoped to a workspace)", "category": "LLM"},
@@ -347,6 +348,7 @@ _SETTINGS_SCHEMA = [
 _SETTING_DEFAULTS = {
     "LLM_PROVIDER": "openai",
     "OPENAI_MODEL": "gpt-5.6-sol",
+    "OPENAI_API_MODE": "responses",
     "ANTHROPIC_MODEL": "claude-opus-5-5",
     "ANTHROPIC_MAX_TOKENS": "16000",
     "ANTHROPIC_FALLBACK": "auto",
@@ -876,18 +878,22 @@ _TOOL_RESULT_MAX_CHARS = 24_000
 def _llm_error_message(exc: Exception) -> str:
     """Actionable text for common LLM API failures (never includes keys)."""
     status = getattr(exc, "status_code", None)
-    text = str(exc).lower()
+    text = f"{exc} {getattr(exc, 'message', '')}".lower()
     if "workspace" in text and "anthropic-workspace-id" in text:
         return ("The Anthropic API key is not scoped to a workspace. An admin must set "
                 "'Anthropic workspace ID' (wrkspc_...) in Admin → LLM, or use a workspace-scoped key.")
     if status in (401, 403) or "authentication" in text or "invalid x-api-key" in text:
         return "The LLM provider rejected the API key. An admin should check the key in Admin → LLM."
-    if status == 404 or "model" in text and ("not found" in text or "not_found" in text):
+    if status == 404 or "invalid model" in text or "model" in text and ("not found" in text or "not_found" in text):
         return "The configured LLM model was not found. An admin should check the model name in Admin → LLM."
     if status == 429:
         return "The LLM provider is rate-limiting requests. Please retry in a minute."
     if status is not None and status >= 500:
         return "The LLM provider is having problems. Please retry shortly."
+    if status == 400:
+        detail = str(getattr(exc, "message", "") or exc)
+        detail = re.sub(r"(sk-[A-Za-z0-9_\-]{4})[A-Za-z0-9_\-]+", r"\1***", detail)[:400]
+        return f"The LLM provider rejected the request: {detail}"
     return "LLM request failed. Please retry later."
 
 

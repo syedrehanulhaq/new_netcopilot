@@ -177,3 +177,13 @@ def test_llm_errors_are_actionable(status, message, expected):
     exc = Exception(message)
     exc.status_code = status
     assert expected in appmod._llm_error_message(exc)
+
+
+def test_rejected_requests_show_the_provider_reason_without_keys():
+    exc = Exception("x")
+    exc.status_code = 400
+    exc.message = "Function tools with reasoning_effort are not supported; key sk-proj-ABCDEFGHIJKLMNOP"
+    text = appmod._llm_error_message(exc)
+    assert "Function tools with reasoning_effort" in text and "ABCDEFGHIJKLMNOP" not in text
+    exc.message = "invalid model ID"
+    assert "model was not found" in appmod._llm_error_message(exc)

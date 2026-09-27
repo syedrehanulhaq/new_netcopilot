@@ -42,6 +42,7 @@ def get_llm_adapter() -> Optional[LLMAdapter]:
             base_url=local_base_url,
             reasoning_effort=get_setting("LOCAL_LLM_REASONING_EFFORT", ""),
             max_completion_tokens=_int_setting("LOCAL_LLM_MAX_COMPLETION_TOKENS", 0),
+            api_mode=get_setting("LOCAL_LLM_API_MODE", "chat"),
         )
 
     openai_api_key = get_setting("OPENAI_API_KEY", "")
@@ -51,4 +52,5 @@ def get_llm_adapter() -> Optional[LLMAdapter]:
         api_key=openai_api_key,
         reasoning_effort=get_setting("OPENAI_REASONING_EFFORT", ""),
         max_completion_tokens=_int_setting("OPENAI_MAX_COMPLETION_TOKENS", 0),
+        api_mode=get_setting("OPENAI_API_MODE", "responses"),
     )
