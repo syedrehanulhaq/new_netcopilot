@@ -226,8 +226,14 @@ def test_junos_recent_changes_and_diff(monkeypatch):
         def get_commit_information(self):
             return commits
 
-        def get_configuration(self, options=None):
+        def get_config(self, options=None):
             seen["options"] = options
+            return diff
+
+        def get_configuration(self, *args, **kwargs):
+            if "options" in kwargs:  # what real PyEZ does with a dict-valued RPC argument
+                raise ValueError("The value ... for argument options is of <class 'dict'>. Argument values must be "
+                                 "a string, boolean, or list/tuple of strings and booleans.")
             return diff
 
     class _Dev:

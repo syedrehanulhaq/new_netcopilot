@@ -1028,6 +1028,25 @@ async def _agentic_loop(
     user: str,
     role: str,
 ):
+    """_agentic_loop_steps, with identical device calls shared for the duration of the request."""
+    from adapters.devices.dispatcher import end_shared_calls, start_shared_calls
+
+    start_shared_calls()
+    try:
+        async for event in _agentic_loop_steps(request_id, messages, tools, model, user, role):
+            yield event
+    finally:
+        end_shared_calls()
+
+
+async def _agentic_loop_steps(
+    request_id: str,
+    messages: list,
+    tools: list,
+    model: str,
+    user: str,
+    role: str,
+):
     """
     Async generator — the core agentic tool loop.
 

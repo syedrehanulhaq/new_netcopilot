@@ -23,6 +23,7 @@ from credentials import get_secret
 from adapters.devices.registry import get_device_info, resolve_host
 from adapters.devices.pool import get_pool, CircuitOpenError
 from adapters.devices.safety import UnsafeInputError, validate_cli_command
+from adapters.devices.ssh_cache import SSHSessionCache
 from adapters.devices.ssh_options import check_reachable, junos_host_key_params
 
 logger = logging.getLogger("netcopilot.adapters.junos")
@@ -36,16 +37,39 @@ def _scrub_error(msg: str) -> str:
     return msg
 
 
+def _netconf_alive(dev) -> bool:
+    conn = getattr(dev, "_conn", None)
+    return bool(dev.connected and conn is not None and conn.connected)
+
+
+# NETCONF sessions are reused between calls: opening one (SSH + NETCONF hello)
+# costs ~2 s, the RPC itself well under 1 s. Exclusive checkout, as for SSH.
+_SESSIONS = SSHSessionCache("junos", alive=_netconf_alive)
+
+
+def _is_transport_error(exc: BaseException) -> bool:
+    """The session itself failed (closed by the device, broken pipe), as opposed to an RPC error."""
+    from jnpr.junos.exception import ConnectClosedError
+    from ncclient.transport.errors import TransportError
+
+    return isinstance(exc, (ConnectClosedError, TransportError, EOFError, OSError))
+
+
 async def _run_tool(device: str, fn_callable, pool=None, **err_extra) -> dict:
     """Run callable in executor with circuit breaker, timeout, and error scrubbing."""
     _pool = pool or get_pool()
     try:
         async with _pool.acquire(device):
             loop = asyncio.get_event_loop()
-            result = await asyncio.wait_for(
-                loop.run_in_executor(None, fn_callable),
-                timeout=_EXECUTOR_TIMEOUT,
-            )
+            reused = _SESSIONS.idle_count(device) > 0
+            try:
+                result = await asyncio.wait_for(loop.run_in_executor(None, fn_callable), timeout=_EXECUTOR_TIMEOUT)
+            except Exception as exc:
+                if not (reused and _is_transport_error(exc)):
+                    raise
+                # A cached session had died (device closed it while idle): retry once on a new one.
+                _SESSIONS.discard(device)
+                result = await asyncio.wait_for(loop.run_in_executor(None, fn_callable), timeout=_EXECUTOR_TIMEOUT)
             _pool.record_success(device)
             return result
     except asyncio.TimeoutError:
@@ -98,7 +122,7 @@ def _float(value: str, default: float = 0.0) -> float:
 @contextmanager
 def _connect(device_name: str):
     """
-    Resolve host, read credentials, open a PyEZ Device, yield it, then close.
+    Resolve host, read credentials, yield a PyEZ Device (a cached NETCONF session when one is idle).
 
     Raises:
         ValueError   if device is not in the registry
@@ -116,33 +140,30 @@ def _connect(device_name: str):
                        or port or get_secret("NETCONF_PORT", "830"))
     timeout = int(get_secret("NETCONF_TIMEOUT", "30"))
 
-    check_reachable(host, netconf_port)
+    def _open():
+        from jnpr.junos import Device
+        from jnpr.junos.exception import ConnectError
 
-    from jnpr.junos import Device
-    from jnpr.junos.exception import ConnectError
-
-    dev = Device(
-        host=host,
-        port=netconf_port,
-        user=user,
-        passwd=passwd,
-        auto_probe=0,
-        gather_facts=False,
-        conn_open_timeout=timeout,
-        **junos_host_key_params(),
-    )
-    try:
-        dev.open(auto_probe=0)
-        yield dev
-    except ConnectError as exc:
-        raise RuntimeError(
-            f"Cannot connect to {device_name} ({host}:{netconf_port}): {exc}"
-        ) from exc
-    finally:
+        check_reachable(host, netconf_port)
+        dev = Device(
+            host=host,
+            port=netconf_port,
+            user=user,
+            passwd=passwd,
+            auto_probe=0,
+            gather_facts=False,
+            conn_open_timeout=timeout,
+            **junos_host_key_params(),
+        )
         try:
-            dev.close()
-        except Exception:
-            pass
+            dev.open(auto_probe=0)
+        except ConnectError as exc:
+            raise RuntimeError(f"Cannot connect to {device_name} ({host}:{netconf_port}): {exc}") from exc
+        return dev
+
+    # Reused while healthy; closed (not returned to the cache) if the call raises.
+    with _SESSIONS.session(device_name, _open) as dev:
+        yield dev
 
 
 # ---------------------------------------------------------------------------
@@ -698,9 +719,8 @@ def _sync_get_config_diff(device: str, rollback: int = 1) -> dict:
     if not 1 <= rollback <= 49:
         return {"device": device, "error": "rollback must be between 1 and 49."}
     with _connect(device) as dev:
-        rpc = dev.rpc.get_configuration(
-            options={"compare": "rollback", "rollback": str(rollback), "format": "text"}
-        )
+        # get_config takes an options dict; the raw get_configuration RPC rejects one.
+        rpc = dev.rpc.get_config(options={"compare": "rollback", "rollback": str(rollback), "format": "text"})
         node = rpc.find(".//configuration-output")
         diff = node.text if node is not None and node.text else ""
         return {

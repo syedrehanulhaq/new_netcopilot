@@ -37,6 +37,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -540,12 +541,10 @@ class PlaybookRunner:
             playbook["name"], intent, list(params.keys()),
         )
 
-        steps: list[StepResult] = []
-        for step in playbook["steps"]:
+        async def run_step(step: dict) -> StepResult:
             tool_name, args, skip_reason = plan_step(step, params, device_vendor)
             if skip_reason:
-                steps.append(StepResult(tool_name, args, {}, 0.0, skipped=skip_reason))
-                continue
+                return StepResult(tool_name, args, {}, 0.0, skipped=skip_reason)
 
             step_start = time.monotonic()
             step_error: Optional[str] = None
@@ -565,14 +564,17 @@ class PlaybookRunner:
                 result = {"error": step_error, "tool": tool_name}
                 logger.warning("Step %r failed: %s", tool_name, exc)
 
-            steps.append(StepResult(
+            return StepResult(
                 tool_name=tool_name,
                 args=args,
                 result=result,
                 elapsed_ms=(time.monotonic() - step_start) * 1000,
                 error=step_error,
                 skipped=skipped,
-            ))
+            )
+
+        # Steps are independent read-only checks: run them together (results keep step order).
+        steps: list[StepResult] = list(await asyncio.gather(*(run_step(step) for step in playbook["steps"])))
 
         severity = _evaluate_severity(playbook["severity_rules"], steps)
         if not any(s for s in steps if not s.skipped and not s.error):

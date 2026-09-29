@@ -1,5 +1,6 @@
 """
-SSH session cache shared by the Netmiko-based adapters (Cisco, Nokia, Aruba).
+Session cache shared by the device adapters: Netmiko SSH (Cisco, Nokia, Aruba)
+and PyEZ NETCONF (Junos).
 
 Sessions are checked out for exclusive use and checked back in when the call
 succeeds. A Netmiko connection is a single interactive channel, so two tool
@@ -27,16 +28,21 @@ logger = logging.getLogger("netcopilot.ssh_cache")
 
 def _disconnect(conn: Any) -> None:
     try:
-        conn.disconnect()
+        if hasattr(conn, "disconnect"):
+            conn.disconnect()  # Netmiko
+        else:
+            conn.close()       # PyEZ Device
     except Exception:
         pass
 
 
 class SSHSessionCache:
-    def __init__(self, name: str, ttl: float = 90.0, max_idle: int = 20) -> None:
+    def __init__(self, name: str, ttl: float = 90.0, max_idle: int = 20,
+                 alive: Optional[Callable[[Any], bool]] = None) -> None:
         self.name = name
         self.ttl = ttl
         self.max_idle = max_idle
+        self.alive = alive  # optional liveness check applied when a session is checked out
         self._idle: dict[str, list[tuple[Any, float]]] = {}
         self._lock = threading.Lock()
 
@@ -49,7 +55,7 @@ class SSHSessionCache:
             entries = self._idle.get(device, [])
             while entries:
                 candidate, last_used = entries.pop()
-                if now - last_used <= self.ttl:
+                if now - last_used <= self.ttl and (self.alive is None or self._is_alive(candidate)):
                     conn = candidate
                     break
                 stale.append(candidate)
@@ -71,6 +77,19 @@ class SSHSessionCache:
             self._idle.setdefault(device, []).append((conn, time.monotonic()))
         for old in evicted:
             _disconnect(old)
+
+    def _is_alive(self, conn: Any) -> bool:
+        try:
+            return bool(self.alive(conn))
+        except Exception:
+            return False
+
+    def discard(self, device: str) -> None:
+        """Close every idle session for device (e.g. after one turned out to be dead)."""
+        with self._lock:
+            entries = self._idle.pop(device, [])
+        for conn, _ in entries:
+            _disconnect(conn)
 
     def idle_count(self, device: Optional[str] = None) -> int:
         with self._lock:

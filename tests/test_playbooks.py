@@ -191,3 +191,52 @@ def test_run_playbook_reports_failure_when_every_step_failed(monkeypatch):
     result = asyncio.run(d._run_playbook({"intent": "cpu_high", "device": "xr1"}))
     assert result["severity"] == "Unknown"
     assert result["error"].startswith("All playbook steps failed: Cannot reach sandbox:22")
+
+
+def test_playbook_steps_run_together_and_keep_their_order():
+    import time as _time
+
+    started = []
+
+    async def slow_caller(tool, args):
+        started.append(tool)
+        await asyncio.sleep(0.3)
+        return {"admin_status": "up", "oper_status": "down"} if tool == "get_interface_health" else {}
+
+    t0 = _time.monotonic()
+    result = asyncio.run(get_runner().run("link_down", {"device": "pe1", "interface": "ge-0/0/1"}, slow_caller))
+    assert _time.monotonic() - t0 < 0.6                       # 3 steps × 0.3 s, run together
+    assert [s.tool_name for s in result.steps] == ["get_interface_health", "check_link", "get_recent_changes"]
+    assert result.severity == "Critical"
+
+
+def test_identical_device_calls_are_shared_within_a_request(monkeypatch):
+    from adapters.devices import dispatcher as dmod
+
+    calls = []
+
+    async def fake_adapter_call(self, tool_name, arguments, modules):
+        calls.append(tool_name)
+        await asyncio.sleep(0.05)
+        return {"oper_status": "down"}
+
+    monkeypatch.setattr(dmod.ToolDispatcher, "_call_adapter_tool", fake_adapter_call)
+    d = dmod.ToolDispatcher()
+    args = {"device": "pe1", "interface": "ge-0/0/1"}
+
+    async def one_request():
+        dmod.start_shared_calls()
+        try:
+            a, b = await asyncio.gather(d.call_tool("junos_get_interface_health", dict(args)),
+                                        d.call_tool_unprefixed("get_interface_health", dict(args)))
+            a["mutated"] = True                                   # each caller gets its own copy
+            return a, b
+        finally:
+            dmod.end_shared_calls()
+
+    a, b = asyncio.run(one_request())
+    assert calls == ["junos_get_interface_health"] and "mutated" not in b
+    asyncio.run(one_request())
+    assert len(calls) == 2                                        # a new request asks the device again
+    asyncio.run(d.call_tool("junos_get_interface_health", dict(args)))
+    assert len(calls) == 3                                        # outside a request: never shared

@@ -13,8 +13,12 @@ MCPClient connects to them over SSE/streamable-http at startup.
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
+import copy
+import json
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import re
 
@@ -66,6 +70,21 @@ _INTEGRATION_ROLES: dict[str, set[str]] = {
     "prometheus": {"admin", "noc-ticket", "noc"},
     "syslog":     {"admin", "noc-ticket", "noc"},
 }
+
+
+# Identical read-only device calls made while handling one request share a single
+# device call: the model and a playbook (or check_link) often ask the same device the
+# same thing at the same moment. Scoped per request so a later "check again" is fresh.
+_shared_calls: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar("netcopilot_shared_calls",
+                                                                               default=None)
+
+
+def start_shared_calls() -> None:
+    _shared_calls.set({})
+
+
+def end_shared_calls() -> None:
+    _shared_calls.set(None)
 
 
 class ToolDispatcher:
@@ -143,7 +162,22 @@ class ToolDispatcher:
     # ------------------------------------------------------------------
 
     async def call_tool(self, tool_name: str, arguments: dict) -> Any:
-        """Route a tool call to the correct backend."""
+        """Route a tool call to the correct backend (sharing identical read-only calls within a request)."""
+        shared = _shared_calls.get()
+        if shared is None or not (tool_name == "check_link" or _is_device_tool(tool_name)):
+            return await self._call_tool(tool_name, arguments)
+        device = arguments.get("device", "")
+        if device and _is_device_tool(tool_name):
+            tool_name = correct_tool_vendor(tool_name, device)
+        key = (tool_name, json.dumps(arguments, sort_keys=True, default=str))
+        task = shared.get(key)
+        if task is None:
+            task = asyncio.ensure_future(self._call_tool(tool_name, arguments))
+            shared[key] = task
+        # shield: one caller being cancelled must not cancel the call the others are waiting on
+        return copy.deepcopy(await asyncio.shield(task))
+
+    async def _call_tool(self, tool_name: str, arguments: dict) -> Any:
 
         # Meta-tools
         if tool_name == "run_playbook":

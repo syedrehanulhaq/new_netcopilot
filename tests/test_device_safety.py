@@ -200,3 +200,90 @@ def test_failed_fresh_connection_is_not_retried(monkeypatch):
     with pytest.raises(ConnectionError):
         cisco._cli("xr1", "show version")
     assert attempts == ["xr1"]  # one attempt, not two
+
+
+class _FakeJunosDevice:
+    """Stands in for jnpr.junos.Device; counts logins and can simulate a session the device closed."""
+    opened = 0
+
+    def __init__(self, **kwargs):
+        self.connected = False
+        self._conn = None
+        self.dead = False
+
+    def open(self, **kwargs):
+        type(self).opened += 1
+        self.connected = True
+        self._conn = type("Conn", (), {"connected": True})()
+        return self
+
+    def close(self):
+        self.connected = False
+
+    def show(self):
+        if self.dead:
+            from jnpr.junos.exception import ConnectClosedError
+            raise ConnectClosedError(self)
+        return "ok"
+
+
+@pytest.fixture
+def fake_junos(monkeypatch):
+    import jnpr.junos
+
+    from adapters.devices import junos
+    from adapters.devices.ssh_cache import SSHSessionCache
+
+    monkeypatch.setenv("JUNIPER_USER", "u")
+    monkeypatch.setenv("JUNIPER_PASS", "p")
+    monkeypatch.setattr(jnpr.junos, "Device", _FakeJunosDevice)
+    monkeypatch.setattr(junos, "_SESSIONS", SSHSessionCache("junos-test", alive=junos._netconf_alive))
+    _FakeJunosDevice.opened = 0
+    return junos
+
+
+def test_junos_reuses_netconf_sessions(fake_junos):
+    junos = fake_junos
+    for _ in range(3):
+        with junos._connect("pe1") as dev:
+            assert dev.show() == "ok"
+    assert _FakeJunosDevice.opened == 1
+
+
+def test_junos_skips_a_session_the_device_closed(fake_junos):
+    junos = fake_junos
+    with junos._connect("pe1") as dev:
+        cached = dev
+    cached._conn.connected = False  # ncclient noticed the device closed the session
+    with junos._connect("pe1") as dev:
+        assert dev is not cached
+    assert _FakeJunosDevice.opened == 2
+
+
+def test_junos_retries_once_when_a_cached_session_is_dead(fake_junos):
+    junos = fake_junos
+
+    def call():
+        with junos._connect("pe1") as dev:
+            return dev.show()
+
+    assert asyncio.run(junos._run_tool("pe1", call)) == "ok"  # opens a session and caches it
+    for conn, _ in junos._SESSIONS._idle["pe1"]:
+        conn.dead = True  # the device dropped it, but ncclient hasn't noticed yet
+    assert asyncio.run(junos._run_tool("pe1", call)) == "ok"  # fails on the cached one, retried fresh
+    assert _FakeJunosDevice.opened == 2
+
+
+def test_junos_rpc_errors_are_not_retried(fake_junos):
+    junos = fake_junos
+    calls = []
+
+    def call():
+        with junos._connect("pe1"):
+            calls.append(1)
+            raise ValueError("interface not found")
+
+    with junos._connect("pe1"):
+        pass  # a cached session exists
+    result = asyncio.run(junos._run_tool("pe1", call))
+    assert "interface not found" in result["error"] and len(calls) == 1
