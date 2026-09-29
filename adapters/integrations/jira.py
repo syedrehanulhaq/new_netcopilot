@@ -184,19 +184,44 @@ def _sync_create_ticket(
     }
     try:
         r = httpx.post(f"{_base()}/rest/api/3/issue", json=payload, auth=_auth(), timeout=15)
+        # Team-managed projects often leave priority (or labels) off the create screen,
+        # and Jira rejects the whole issue for it. Retry once without just those fields.
+        dropped = _rejected_optional_fields(r)
+        if dropped:
+            for f in dropped:
+                payload["fields"].pop(f, None)
+            r = httpx.post(f"{_base()}/rest/api/3/issue", json=payload, auth=_auth(), timeout=15)
         if not r.is_success:
             return {"error": f"Jira API error {r.status_code}", "details": r.text}
         key = r.json().get("key")
-        return {
+        result = {
             "ticket_id": key,
             "ticket_url": f"{_base()}/browse/{key}",
             "ticket_type": resolved_type,
             "summary": summary,
-            "priority": resolved_priority,
+            "priority": None if "priority" in dropped else resolved_priority,
             "team": team,
         }
+        if dropped:
+            result["note"] = (f"Project {_project_key()} does not accept {' or '.join(dropped)} on new issues, "
+                              f"so the ticket was created without it.")
+        return result
     except Exception as exc:
         return {"error": f"Jira request failed: {exc}"}
+
+
+_OPTIONAL_FIELDS = ("priority", "labels")
+
+
+def _rejected_optional_fields(response) -> list[str]:
+    """Optional fields named in a 400 'cannot be set' response; [] for any other outcome."""
+    if response.status_code != 400:
+        return []
+    try:
+        errors = response.json().get("errors") or {}
+    except ValueError:
+        return []
+    return [f for f in _OPTIONAL_FIELDS if f in errors]
 
 
 def _sync_close_ticket(issue_key: str, transition_name: str = "Done") -> Dict[str, Any]:
