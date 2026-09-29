@@ -23,7 +23,7 @@ from credentials import get_secret
 from adapters.devices.registry import resolve_host
 from adapters.devices.pool import get_pool, CircuitOpenError
 from adapters.devices.safety import UnsafeInputError, validate_cli_command
-from adapters.devices.ssh_options import junos_host_key_params
+from adapters.devices.ssh_options import check_reachable, junos_host_key_params
 
 logger = logging.getLogger("netcopilot.adapters.junos")
 
@@ -113,6 +113,8 @@ def _connect(device_name: str):
 
     netconf_port = port or int(get_secret("NETCONF_PORT", "830"))
     timeout = int(get_secret("NETCONF_TIMEOUT", "30"))
+
+    check_reachable(host, netconf_port)
 
     from jnpr.junos import Device
     from jnpr.junos.exception import ConnectError

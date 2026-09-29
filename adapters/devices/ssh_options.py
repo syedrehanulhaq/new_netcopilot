@@ -44,3 +44,27 @@ def junos_host_key_params() -> dict:
     if not strict_host_key_checking():
         return {}
     return {"hostkey_verify": True}
+
+
+def check_reachable(host: str, port: int) -> None:
+    """
+    Fail fast when a device's management port doesn't answer: a TCP connect with a
+    short timeout (DEVICE_CONNECT_CHECK_SECONDS, default 5; 0 disables) instead of
+    waiting for the SSH/NETCONF library's much longer timeouts.
+    """
+    import socket
+
+    from settings import get_setting_int
+
+    timeout = get_setting_int("DEVICE_CONNECT_CHECK_SECONDS", 5)
+    if timeout <= 0:
+        return
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            pass
+    except OSError as exc:
+        reason = "timed out" if isinstance(exc, TimeoutError) else (exc.strerror or type(exc).__name__)
+        raise ConnectionError(
+            f"Cannot reach {host}:{port} ({reason} after {timeout}s). Check the device address/port "
+            f"in the inventory and that this server can reach the device's management network."
+        ) from exc

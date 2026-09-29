@@ -157,3 +157,46 @@ def test_junos_cpu_fully_busy_is_reported_as_100_percent(monkeypatch):
     monkeypatch.setattr(junos, "_connect", _fake_connect)
     result = junos._sync_get_cpu_memory("pe1")
     assert result["cpu_percent"] == 100
+
+
+def _closed_local_port():
+    import socket
+
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()  # nothing listens here now → connection refused immediately
+    return port
+
+
+def test_unreachable_device_fails_fast_with_clear_message(monkeypatch):
+    import time
+
+    from adapters.devices import cisco, registry
+    from conftest import write_devices
+
+    port = _closed_local_port()
+    write_devices({"devices": {"lab-xr": {"host": "127.0.0.1", "port": port, "vendor": "cisco"}}})
+    registry.reload_registry()
+    monkeypatch.setenv("DEVICE_CONNECT_CHECK_SECONDS", "3")
+    started = time.time()
+    result = asyncio.run(cisco.get_cpu_memory(device="lab-xr"))
+    assert f"Cannot reach 127.0.0.1:{port}" in result["error"]
+    assert time.time() - started < 3
+
+
+def test_failed_fresh_connection_is_not_retried(monkeypatch):
+    from adapters.devices import cisco
+    from adapters.devices.ssh_cache import SSHSessionCache
+
+    attempts = []
+
+    def failing_connect(device):
+        attempts.append(device)
+        raise ConnectionError("Cannot reach 192.0.2.1:22")
+
+    monkeypatch.setattr(cisco, "_SESSIONS", SSHSessionCache("cisco"))
+    monkeypatch.setattr(cisco, "_connect", failing_connect)
+    with pytest.raises(ConnectionError):
+        cisco._cli("xr1", "show version")
+    assert attempts == ["xr1"]  # one attempt, not two

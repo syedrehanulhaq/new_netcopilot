@@ -31,7 +31,7 @@ from adapters.devices.parsers import parse_aruba_bgp_summary, parse_aruba_interf
 from adapters.devices.pool import get_pool, CircuitOpenError
 from adapters.devices.safety import UnsafeInputError, reject_control_chars, validate_cli_command
 from adapters.devices.ssh_cache import SSHSessionCache
-from adapters.devices.ssh_options import netmiko_host_key_params
+from adapters.devices.ssh_options import check_reachable, netmiko_host_key_params
 
 logger = logging.getLogger("netcopilot.adapters.aruba")
 
@@ -74,6 +74,7 @@ def _connect(device_name: str):
     }
     if port:
         params["port"] = port
+    check_reachable(host, port or 22)
     params.update(netmiko_host_key_params())
     return ConnectHandler(**params)
 
@@ -84,11 +85,14 @@ def _ssh(device_name: str, fresh: bool = False):
 
 
 def _cli(device: str, command: str) -> str:
-    """Run CLI command via SSH, retrying once with a fresh connection on failure."""
+    """Run a CLI command via SSH; retry once with a fresh connection if a reused session failed."""
+    reused = _SESSIONS.idle_count(device) > 0
     try:
         with _ssh(device) as conn:
             return conn.send_command(command)
     except Exception:
+        if not reused:
+            raise  # a brand-new connection failed: retrying would just double the wait
         logger.debug("SSH retry with fresh connection to %s", device)
         with _ssh(device, fresh=True) as conn:
             return conn.send_command(command)

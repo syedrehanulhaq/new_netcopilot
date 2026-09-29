@@ -315,6 +315,19 @@ async function sendMessage() {
   const started = performance.now();
   const stepItems = [];
   let toolCount = 0;
+  let pendingTools = 0;
+  // Live status with elapsed seconds, so a slow device never looks like a frozen page.
+  let statusTimer = null;
+  const showStatus = (label) => {
+    clearInterval(statusTimer);
+    const t0 = performance.now();
+    content.textContent = `${label}…`;
+    statusTimer = setInterval(() => {
+      content.textContent = `${label}… ${Math.round((performance.now() - t0) / 1000)}s`;
+    }, 1000);
+  };
+  const stopStatus = () => clearInterval(statusTimer);
+  showStatus("Thinking");
   const updateSummary = () => {
     const failed = stepItems.filter((li) => li.classList.contains("failed")).length;
     stepsSummary.textContent = `Evidence: ${toolCount} tool call${toolCount === 1 ? "" : "s"}` +
@@ -359,7 +372,8 @@ async function sendMessage() {
           li.textContent = `⚙ ${evt.name}  ${JSON.stringify(evt.args || {})}`;
           stepItems.push(li);
           stepsList.appendChild(li);
-          content.textContent = `Running ${evt.name}…`;
+          pendingTools += 1;
+          showStatus(`Running ${evt.name}`);
           updateSummary();
         } else if (evt.type === "tool_end") {
           const li = stepItems.find((item) => item.dataset.tool === evt.name && !item.dataset.done);
@@ -368,15 +382,20 @@ async function sendMessage() {
             li.textContent = li.textContent.replace(/^⚙/, evt.error ? "✕" : "✓") + `  (${evt.ms} ms)`;
             if (evt.error) li.classList.add("failed");
           }
+          pendingTools = Math.max(0, pendingTools - 1);
+          if (!pendingTools) showStatus("Analyzing results");
           updateSummary();
         } else if (evt.type === "reply") {
+          stopStatus();
           content.classList.remove("thinking");
           content.innerHTML = renderMarkdown(evt.content);
         } else if (evt.type === "error") {
+          stopStatus();
           content.classList.remove("thinking");
           content.classList.add("error-text");
           content.textContent = evt.text;
         } else if (evt.type === "done") {
+          stopStatus();
           const seconds = ((performance.now() - started) / 1000).toFixed(1);
           footer.textContent = `${seconds}s`;
           if (evt.investigation_id) {
@@ -394,6 +413,7 @@ async function sendMessage() {
     content.classList.add("error-text");
     content.textContent = `Error: ${err}`;
   } finally {
+    stopStatus();
     sendBtn.disabled = false;
     bubble.scrollIntoView({ block: "end" });
     messageEl.focus();

@@ -22,7 +22,7 @@ from adapters.devices.registry import resolve_host
 from adapters.devices.pool import get_pool, CircuitOpenError
 from adapters.devices.safety import UnsafeInputError, reject_control_chars, validate_cli_command
 from adapters.devices.ssh_cache import SSHSessionCache
-from adapters.devices.ssh_options import netmiko_host_key_params
+from adapters.devices.ssh_options import check_reachable, netmiko_host_key_params
 
 logger = logging.getLogger("netcopilot.adapters.cisco")
 
@@ -52,6 +52,7 @@ def _connect(device_name: str):
     }
     if port:
         params["port"] = port
+    check_reachable(host, port or 22)
     params.update(netmiko_host_key_params())
     return ConnectHandler(**params)
 
@@ -62,11 +63,14 @@ def _ssh(device_name: str, fresh: bool = False):
 
 
 def _cli(device: str, command: str) -> str:
-    """Run a CLI command via SSH, retrying once with a fresh connection on failure."""
+    """Run a CLI command via SSH; retry once with a fresh connection if a reused session failed."""
+    reused = _SESSIONS.idle_count(device) > 0
     try:
         with _ssh(device) as conn:
             return conn.send_command(command)
     except Exception:
+        if not reused:
+            raise  # a brand-new connection failed: retrying would just double the wait
         logger.debug("SSH retry with fresh connection to %s", device)
         with _ssh(device, fresh=True) as conn:
             return conn.send_command(command)
@@ -183,9 +187,12 @@ def _sync_get_interface_health(device: str, interface: str) -> dict:
                 pass
         return {"device": device, "interface": interface, **parsed}
 
+    reused = _SESSIONS.idle_count(device) > 0
     try:
         return _do()
     except Exception:
+        if not reused:
+            raise
         logger.debug("SSH retry for get_interface_health on %s %s", device, interface)
         return _do(fresh=True)
 
