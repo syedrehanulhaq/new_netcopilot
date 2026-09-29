@@ -335,3 +335,50 @@ def test_metrics_token(monkeypatch):
     with TestClient(appmod.app) as client:
         assert client.get("/metrics").status_code == 401
         assert client.get("/metrics", headers={"Authorization": "Bearer m-tok"}).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Junos route-engine CPU / memory: tag names differ between RE types
+# ---------------------------------------------------------------------------
+
+def _junos_cpu_memory(monkeypatch, route_engine_xml):
+    from contextlib import contextmanager
+
+    from lxml import etree
+
+    from adapters.devices import junos
+
+    xml = etree.fromstring(f"<route-engine-information><route-engine>{route_engine_xml}</route-engine></route-engine-information>")
+
+    class _Dev:
+        class rpc:
+            @staticmethod
+            def get_route_engine_information():
+                return xml
+
+    @contextmanager
+    def _fake_connect(device):
+        yield _Dev()
+
+    monkeypatch.setattr(junos, "_connect", _fake_connect)
+    return junos._sync_get_cpu_memory("pe1")
+
+
+def test_vmx_memory_uptime_and_missing_temperature(monkeypatch):
+    # Captured from a vMX running Junos 25.2R2.11 (vLabs)
+    result = _junos_cpu_memory(monkeypatch, """
+        <memory-dram-size>1993 MB</memory-dram-size><memory-installed-size>(2048 MB installed)</memory-installed-size>
+        <memory-buffer-utilization>59</memory-buffer-utilization><cpu-idle>98</cpu-idle><model>RE-VMX</model>
+        <up-time seconds="1231">20 minutes, 31 seconds</up-time>""")
+    assert result["cpu_percent"] == 2
+    assert result["memory_used_percent"] == 59 and result["memory_total_mb"] == 1993
+    assert result["uptime"] == "20 minutes, 31 seconds"
+    assert result["temperature_c"] is None  # no sensor → unknown, not 0 °C
+    assert result["summary"] == "CPU 2% used, memory 59% used"
+
+
+def test_physical_re_temperature_is_read_in_celsius(monkeypatch):
+    result = _junos_cpu_memory(monkeypatch, """
+        <temperature celsius="36">36 degrees C / 96 degrees F</temperature><cpu-idle>90</cpu-idle>""")
+    assert result["temperature_c"] == 36.0
+    assert result["memory_used_percent"] is None and result["summary"] == "CPU 10% used"

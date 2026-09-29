@@ -76,3 +76,33 @@ def test_find_device_never_guesses_between_devices_sharing_an_address():
     assert registry.find_device("192.0.2.10:9116") is None       # ambiguous → no guess
     assert registry.find_device("192.0.2.10:33033") == "p5"      # port disambiguates
     assert registry.find_device("PE1.lab.example.net") == "pe1"  # FQDN → short name
+
+
+def test_junos_uses_the_devices_netconf_port(monkeypatch):
+    from jnpr.junos import Device
+
+    from adapters.devices import junos, registry
+    from conftest import write_devices
+
+    write_devices({"devices": {
+        "vmx": {"host": "192.0.2.30", "port": 37002, "netconf_port": 37000, "vendor": "junos"},
+        "mx": {"host": "192.0.2.31", "port": 33033, "vendor": "junos"},
+        "srx": {"host": "192.0.2.32", "vendor": "junos"},
+    }})
+    registry.reload_registry()
+    monkeypatch.setenv("JUNIPER_USER", "u")
+    monkeypatch.setenv("JUNIPER_PASS", "p")
+    ports = []
+
+    def _record(self, *args, **kwargs):
+        ports.append(self._port)
+        raise RuntimeError("stop before connecting")
+
+    monkeypatch.setattr(Device, "open", _record)
+    for name in ("vmx", "mx", "srx"):
+        try:
+            with junos._connect(name):
+                pass
+        except Exception:
+            pass
+    assert ports == [37000, 33033, 830]  # netconf_port, else port, else NETCONF_PORT default

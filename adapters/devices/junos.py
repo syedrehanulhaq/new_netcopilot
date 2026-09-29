@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from typing import Any, Callable, Optional
 
 from credentials import get_secret
-from adapters.devices.registry import resolve_host
+from adapters.devices.registry import get_device_info, resolve_host
 from adapters.devices.pool import get_pool, CircuitOpenError
 from adapters.devices.safety import UnsafeInputError, validate_cli_command
 from adapters.devices.ssh_options import check_reachable, junos_host_key_params
@@ -111,7 +111,9 @@ def _connect(device_name: str):
     if not user or not passwd:
         raise RuntimeError("JUNIPER_USER or JUNIPER_PASS not configured.")
 
-    netconf_port = port or int(get_secret("NETCONF_PORT", "830"))
+    # The device's netconf_port wins; otherwise its port (NETCONF over SSH), then NETCONF_PORT.
+    netconf_port = int((get_device_info(device_name) or {}).get("netconf_port")
+                       or port or get_secret("NETCONF_PORT", "830"))
     timeout = int(get_secret("NETCONF_TIMEOUT", "30"))
 
     check_reachable(host, netconf_port)
@@ -402,33 +404,45 @@ def _sync_get_cpu_memory(device: str) -> dict:
     """Get routing engine CPU utilization and memory usage."""
     with _connect(device) as dev:
         rpc = dev.rpc.get_route_engine_information()
-        re = rpc.find(".//route-engine")
-        if re is None:
+        engine = rpc.find(".//route-engine")
+        if engine is None:
             return {"device": device, "error": "Route engine info not found"}
 
-        cpu_idle_str = _find(re, "cpu-idle")
+        cpu_idle_str = _find(engine, "cpu-idle")
         cpu_idle = _int(cpu_idle_str)
-        mem_util_str = _find(re, "memory-system-total-used-percent")
+        # Tag names vary by RE type; classic and virtual REs only report memory-buffer-utilization.
+        mem_util_str = (_find(engine, "memory-system-total-used-percent")
+                        or _find(engine, "memory-system-total-util")
+                        or _find(engine, "memory-buffer-utilization"))
         # cpu-idle of 0 means 100% busy — only a missing value is unknown
         cpu_percent = 100 - cpu_idle if cpu_idle_str else None
         mem_percent = _int(mem_util_str) if mem_util_str else None
+        dram = re.match(r"\s*(\d+)\s*MB", _find(engine, "memory-dram-size"))
 
+        summary = f"CPU {cpu_percent}% used" if cpu_percent is not None else "Route engine data retrieved"
+        if mem_percent is not None:
+            summary += f", memory {mem_percent}% used"
         return {
             "device": device,
-            "model": _find(re, "model"),
-            "uptime": _find(re, "uptime"),
+            "model": _find(engine, "model"),
+            "uptime": _find(engine, "up-time") or _find(engine, "uptime"),
             "cpu_percent": cpu_percent,
             "cpu_idle_percent": cpu_idle,
             "memory_used_percent": mem_percent,
-            "memory_total_mb": _int(_find(re, "memory-system-total")) // 1024 or None,
-            "temperature_c": _float(_find(re, "temperature")),
-            "last_reboot_reason": _find(re, "last-reboot-reason"),
-            "summary": (
-                f"CPU {cpu_percent}% used, memory {mem_percent}% used"
-                if cpu_percent is not None
-                else "Route engine data retrieved"
-            ),
+            "memory_total_mb": int(dram.group(1)) if dram else (_int(_find(engine, "memory-system-total")) // 1024 or None),
+            "temperature_c": _re_temperature_c(engine),
+            "last_reboot_reason": _find(engine, "last-reboot-reason"),
+            "summary": summary,
         }
+
+
+def _re_temperature_c(engine) -> Optional[float]:
+    """RE temperature in °C: <temperature celsius="36">36 degrees C / 96 degrees F</temperature>; None when absent (e.g. vMX)."""
+    node = engine.find("temperature")
+    if node is None:
+        return None
+    match = re.match(r"\s*(-?\d+(?:\.\d+)?)", node.get("celsius") or node.text or "")
+    return float(match.group(1)) if match else None
 
 
 def _sync_get_chassis_health(device: str) -> dict:
