@@ -177,3 +177,17 @@ def test_yaml_changes_are_reseeded_into_existing_db(tmp_path, monkeypatch):
     assert [p["title"] for p in store.list_playbooks()] == ["A"]
     yaml_path.write_text("- name: A (fixed)\n  intent: a_intent\n  tools: [get_bgp_summary]\n")
     assert [p["title"] for p in store.list_playbooks()] == ["A (fixed)"]
+
+
+def test_run_playbook_reports_failure_when_every_step_failed(monkeypatch):
+    from adapters.devices.dispatcher import ToolDispatcher
+
+    d = ToolDispatcher()
+
+    async def failing(tool, args):
+        return {"error": "Cannot reach sandbox:22 (timed out after 5s)"}
+
+    d.call_tool_unprefixed = failing
+    result = asyncio.run(d._run_playbook({"intent": "cpu_high", "device": "xr1"}))
+    assert result["severity"] == "Unknown"
+    assert result["error"].startswith("All playbook steps failed: Cannot reach sandbox:22")

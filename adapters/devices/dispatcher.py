@@ -267,6 +267,11 @@ class ToolDispatcher:
             logger.exception("Playbook runner failed for intent=%s: %s", intent, exc)
             return {"error": f"Playbook execution failed: {exc}"}
 
+        error = result.error
+        ran = [s for s in result.steps if not s.skipped]
+        if not error and ran and all(s.error for s in ran):
+            # Nothing produced data: report a failure, not a successful "Unknown" check.
+            error = "All playbook steps failed: " + "; ".join(str(s.error) for s in ran)[:400]
         return {
             "playbook": result.playbook_name,
             "severity": result.severity,
@@ -274,7 +279,7 @@ class ToolDispatcher:
             "summary": result.summary_text,
             "steps_run": len(result.steps),
             "elapsed_ms": round(result.elapsed_ms),
-            **({"error": result.error} if result.error else {}),
+            **({"error": error} if error else {}),
         }
 
     async def _check_link(self, arguments: dict) -> dict:
