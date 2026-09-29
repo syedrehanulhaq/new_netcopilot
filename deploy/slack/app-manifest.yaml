@@ -1,0 +1,38 @@
+# Slack app manifest for NetCopilot.
+# api.slack.com/apps → Create New App → From a manifest → paste this file.
+#
+# Replace https://netcopilot.example.com with NetCopilot's public HTTPS address
+# (slash command and buttons need Slack to reach it). Posting alerts and
+# investigation results only needs the bot token, so the placeholder is fine
+# until then.
+#
+# Scopes are the minimum NetCopilot uses:
+#   chat:write  post alerts, investigation results and thread replies
+#               (invite the app to each channel it posts in)
+#   commands    the /netcopilot slash command
+display_information:
+  name: NetCopilot
+  description: Read-only network troubleshooting assistant
+  background_color: "#1f2937"
+features:
+  bot_user:
+    display_name: NetCopilot
+    always_online: false
+  slash_commands:
+    - command: /netcopilot
+      url: https://netcopilot.example.com/slack/command
+      description: Ask NetCopilot, investigate the latest alert, or open a Jira ticket
+      usage_hint: "is BGP up on pe1?  ·  investigate  ·  ticket <summary>"
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - commands
+settings:
+  interactivity:
+    is_enabled: true
+    request_url: https://netcopilot.example.com/slack/actions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

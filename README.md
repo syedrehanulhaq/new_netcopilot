@@ -61,6 +61,7 @@ playbooks, audit, security posture).
 
 - **Slack:** slash command → `POST /slack/command`, interactivity → `POST /slack/actions`;
   set `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_ALERT_CHANNEL`.
+  Create the app from `deploy/slack/app-manifest.yaml` (minimum scopes: `chat:write`, `commands`).
 - **Teams:** outgoing webhook → `POST /teams/webhook`; set `TEAMS_HMAC_SECRET` (the security
   token Teams shows) and `TEAMS_RESULT_WEBHOOK_URL` for answers that take more than 5 s.
 - **Alertmanager:**
