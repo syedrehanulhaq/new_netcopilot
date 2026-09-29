@@ -39,6 +39,12 @@
       <div class="grid">
         <section class="card chat">
           <h2>Ask NetCopilot</h2>
+          <label class="device-field">
+            Device
+            <select id="device-select">
+              <option value="">All devices</option>
+            </select>
+          </label>
           <label>
             Message
             <textarea id="message" placeholder="e.g. Why is BGP to 10.0.0.2 down on pe1?"></textarea>
@@ -48,12 +54,6 @@
             <button id="send">Send</button>
             <button id="new-chat" title="Forget the conversation history for this chat">New chat</button>
             <button id="history-open" class="secondary-btn" title="Past investigations and their evidence">History</button>
-          </div>
-          <div class="quick">
-            <div class="quick-label">Try</div>
-            <div id="examples" class="chips"></div>
-            <div class="quick-label">Devices</div>
-            <div id="device-chips" class="chips"></div>
           </div>
         </section>
 

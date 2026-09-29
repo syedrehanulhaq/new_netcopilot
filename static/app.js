@@ -286,8 +286,15 @@ async function sendMessage() {
   const user = chatUserId();
   if (!message || sendBtn.disabled) return;
 
+  const outgoing = withDeviceContext(message);
   const userBubble = addBubble("user");
-  userBubble.textContent = message;
+  if (outgoing.device) {
+    const tag = document.createElement("span");
+    tag.className = "device-tag";
+    tag.textContent = outgoing.device;
+    userBubble.appendChild(tag);
+  }
+  userBubble.appendChild(document.createTextNode(message));
   messageEl.value = "";
 
   const bubble = addBubble("assistant");
@@ -319,7 +326,7 @@ async function sendMessage() {
     const response = await apiFetch("/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, user }),
+      body: JSON.stringify({ message: outgoing.text, user }),
     });
     if (!response.ok || !response.body) {
       const data = await response.json().catch(() => ({}));
@@ -419,47 +426,71 @@ messageEl.addEventListener("keydown", (event) => {
 });
 
 // ---------------------------------------------------------------------------
-// Device shortcuts and example questions
+// Device selector
 // ---------------------------------------------------------------------------
-function insertIntoMessage(text) {
-  const { selectionStart: a, selectionEnd: b, value } = messageEl;
-  const before = value.slice(0, a);
-  const spacer = before && !/\s$/.test(before) ? " " : "";
-  messageEl.value = before + spacer + text + value.slice(b);
-  messageEl.focus();
+const deviceSelect = document.getElementById("device-select");
+const DEVICE_STORAGE = "netcopilot_device";
+const VENDOR_LABELS = { cisco: "Cisco IOS XR", junos: "Juniper Junos", nokia: "Nokia SR OS", aruba: "Aruba AOS-CX" };
+const DEFAULT_PLACEHOLDER = "e.g. Why is BGP to 10.0.0.2 down on pe1?";
+
+function updateMessagePlaceholder() {
+  const device = deviceSelect.value;
+  messageEl.placeholder = device
+    ? `Ask about ${device} — e.g. is anything down? what changed recently? check BGP`
+    : DEFAULT_PLACEHOLDER;
 }
 
-function chip(label, onClick, title) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "chip";
-  btn.textContent = label;
-  if (title) btn.title = title;
-  btn.addEventListener("click", onClick);
-  return btn;
-}
-
-async function loadDeviceShortcuts() {
-  const devicesEl = document.getElementById("device-chips");
-  const examplesEl = document.getElementById("examples");
+async function loadDevices() {
   let devices = [];
   try {
     const resp = await apiFetch("/devices");
     if (resp.ok) devices = (await resp.json()).devices || [];
   } catch {}
-  devicesEl.replaceChildren(...devices.slice(0, 24).map((d) =>
-    chip(d.name, () => insertIntoMessage(d.name), `${d.vendor}${d.site ? " · " + d.site : ""}`)));
-  const first = devices[0] ? devices[0].name : "pe1";
-  const examples = [
-    `Is anything down on ${first}?`,
-    `Check BGP on ${first}`,
-    `What changed on ${first} recently?`,
-    `Check both ends of the link <interface> on ${first}`,
-  ];
-  examplesEl.replaceChildren(...examples.map((text) => chip(text, () => {
-    messageEl.value = text;
-    messageEl.focus();
-  })));
+  const byVendor = new Map();
+  devices.forEach((d) => {
+    if (!byVendor.has(d.vendor)) byVendor.set(d.vendor, []);
+    byVendor.get(d.vendor).push(d);
+  });
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = devices.length ? `All devices (${devices.length})` : "No devices in inventory";
+  const groups = [...byVendor.entries()]
+    .sort(([a], [b]) => (VENDOR_LABELS[a] || a).localeCompare(VENDOR_LABELS[b] || b))
+    .map(([vendor, items]) => {
+      const group = document.createElement("optgroup");
+      group.label = VENDOR_LABELS[vendor] || vendor;
+      items.forEach((d) => {
+        const option = document.createElement("option");
+        option.value = d.name;
+        option.textContent = d.site ? `${d.name}  ·  ${d.site}` : d.name;
+        group.appendChild(option);
+      });
+      return group;
+    });
+  deviceSelect.replaceChildren(all, ...groups);
+  let saved = "";
+  try { saved = localStorage.getItem(DEVICE_STORAGE) || ""; } catch {}
+  if (saved && devices.some((d) => d.name === saved)) deviceSelect.value = saved;
+  updateMessagePlaceholder();
+}
+
+deviceSelect.addEventListener("change", () => {
+  try { localStorage.setItem(DEVICE_STORAGE, deviceSelect.value); } catch {}
+  updateMessagePlaceholder();
+  messageEl.focus();
+});
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// The selected device is added to the question unless the question already names it.
+function withDeviceContext(message) {
+  const device = deviceSelect.value;
+  if (!device || new RegExp(`(^|[^\\w.-])${escapeRegExp(device)}($|[^\\w.-])`, "i").test(message)) {
+    return { text: message, device: "" };
+  }
+  return { text: `Device: ${device}\n${message}`, device };
 }
 
 // ---------------------------------------------------------------------------
@@ -1704,4 +1735,4 @@ logoutBtn.addEventListener("click", async () => {
   window.location.href = "/auth/logout";
 });
 
-refreshUser().then(loadDeviceShortcuts);
+refreshUser().then(loadDevices);

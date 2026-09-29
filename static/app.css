@@ -796,8 +796,7 @@ header {
 }
 
 .secondary-btn,
-.link-button,
-.chip {
+.link-button {
   background: #f0f5ff;
   color: var(--ink);
   border: 1px solid rgba(26, 142, 242, 0.2);
@@ -806,38 +805,6 @@ header {
 
 .secondary-btn {
   padding: 10px 16px;
-}
-
-.quick {
-  display: grid;
-  gap: 6px;
-}
-
-.quick-label {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #64748b;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.chip {
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.chip:hover,
-.secondary-btn:hover {
-  transform: none;
-  box-shadow: none;
-  background: #e2ecff;
 }
 
 .transcript {
@@ -1067,4 +1034,33 @@ header {
   .history-shell {
     grid-template-columns: 1fr;
   }
+}
+
+.device-field select {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(26, 142, 242, 0.25);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.device-tag {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.secondary-btn:hover {
+  transform: none;
+  box-shadow: none;
+  background: #e2ecff;
 }
