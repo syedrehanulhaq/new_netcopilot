@@ -45,3 +45,11 @@ def test_other_jira_errors_are_not_retried(jira_env):
     replies += [httpx.Response(400, json={"errors": {"summary": "Summary must be less than 255 characters."}})]
     result = jira._sync_create_ticket("Task", "x" * 300, "details", "NOC", "High")
     assert len(posts) == 1 and "Jira API error 400" in result["error"]
+
+
+def test_description_keeps_paragraphs_and_line_breaks():
+    doc = jira._doc_text("Alert: link down\nDevice: pe1\n\nFindings:\n- far end admin down")
+    assert [p["type"] for p in doc["content"]] == ["paragraph", "paragraph"]
+    assert doc["content"][0]["content"] == [{"type": "text", "text": "Alert: link down"}, {"type": "hardBreak"},
+                                            {"type": "text", "text": "Device: pe1"}]
+    assert doc["content"][1]["content"][-1] == {"type": "text", "text": "- far end admin down"}

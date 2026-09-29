@@ -657,9 +657,28 @@ def _get_latest_alert(
     return None
 
 
-def _get_latest_analysis(channel: str) -> Optional[str]:
-    payload = _get_latest_alert(channel, source="analysis")
-    if payload and isinstance(payload, dict):
+def _get_latest_analysis(channel: str, device: str = "", interface: str = "") -> Optional[str]:
+    """
+    Latest investigation saved for the channel. With a device (and interface), only an
+    investigation of that device/interface counts; analyses saved without them (older
+    rows) still match so existing findings aren't lost.
+    """
+    with sqlite3.connect(_alert_db_path) as conn:
+        rows = conn.execute(
+            "SELECT payload FROM alerts WHERE channel = ? AND source = 'analysis' ORDER BY id DESC LIMIT 25",
+            (channel,),
+        ).fetchall()
+    for (raw,) in rows:
+        try:
+            payload = json.loads(raw or "")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if device and payload.get("device") and payload["device"] != device:
+            continue
+        if interface and payload.get("interface") and payload["interface"] != interface:
+            continue
         return payload.get("analysis") or payload.get("summary")
     return None
 
@@ -690,8 +709,11 @@ def _ticket_from_alert(alert: dict[str, Any], analysis: Optional[str] = None) ->
     base_text = alert.get("text", "NetCopilot alert")
     device = alert.get("device")
     interface = alert.get("interface")
-    summary_parts = [p for p in [base_text, f"on {device}" if device else None, interface] if p]
-    summary = " ".join(summary_parts).strip()
+    # Name the device/interface once: alert texts often already mention them.
+    summary_parts = [base_text,
+                     f"on {device}" if device and device not in base_text else None,
+                     interface if interface and interface not in base_text else None]
+    summary = " ".join(p for p in summary_parts if p).strip()[:250]
 
     details = []
     if device:
@@ -712,8 +734,61 @@ def _ticket_from_alert(alert: dict[str, Any], analysis: Optional[str] = None) ->
         "summary": summary,
         "description": description,
         "team": get_setting("JIRA_DEFAULT_TEAM", "NOC"),
-        "priority": get_setting("JIRA_DEFAULT_PRIORITY", "Medium"),
+        "priority": _SEVERITY_PRIORITY.get(str(alert.get("severity") or "").strip().lower())
+                    or get_setting("JIRA_DEFAULT_PRIORITY", "Medium"),
     }
+
+
+# Alert severity → Jira priority (unknown severities use JIRA_DEFAULT_PRIORITY).
+_SEVERITY_PRIORITY = {
+    "critical": "Highest", "emergency": "Highest", "page": "Highest",
+    "major": "High", "high": "High", "error": "High",
+    "minor": "Medium", "warning": "Medium", "medium": "Medium",
+    "low": "Low", "info": "Low",
+}
+
+
+def _slack_ticket_denied() -> Optional[str]:
+    """Why Slack may not create Jira tickets (SLACK_ROLE lacks Jira access), or None when it may."""
+    from adapters.devices.dispatcher import _INTEGRATION_ROLES
+
+    role = get_setting("SLACK_ROLE", "noc")
+    allowed = _INTEGRATION_ROLES.get("jira", set())
+    if role in allowed:
+        return None
+    return (f"Tickets can't be created from Slack: Slack requests run with the '{role}' role, and Jira is "
+            f"limited to {' / '.join(sorted(allowed))}. An admin can set SLACK_ROLE to noc-ticket "
+            f"in Admin → Settings.")
+
+
+async def _slash_ticket(ticket: dict[str, str], channel_key: str, user_name: str) -> str:
+    """/netcopilot ticket [summary | description | …]: role-checked, carries the channel's latest findings."""
+    if ticket.get("summary") == "NetCopilot ticket":
+        return "No recent alert in this channel to ticket. Use /netcopilot ticket <summary> | <description>."
+    ticket = dict(ticket)
+    if ticket.get("description") == ticket.get("summary"):  # no description given
+        analysis = _get_latest_analysis(channel_key)
+        if analysis:
+            ticket["description"] += "\n\nLatest NetCopilot investigation in this channel:\n" + analysis
+    return await _create_slack_ticket(ticket, user_name)
+
+
+async def _create_slack_ticket(ticket: dict[str, str], user_name: str) -> str:
+    """Create a Jira ticket for an explicit Slack request (button or /netcopilot ticket), role-checked."""
+    denied = _slack_ticket_denied()
+    if denied:
+        return denied
+    if not _dispatcher:
+        return "Ticket creation is unavailable: tools are not initialised."
+    result = await _dispatcher.call_tool("jira_create_ticket", ticket)
+    _audit_log({"event": "slack_ticket", "user": user_name, "summary": ticket.get("summary"),
+                "ticket": result.get("ticket_id"), "error": result.get("error")})
+    if result.get("error"):
+        return f"Ticket creation failed: {result['error']}"
+    reply = f"🎫 Created {result.get('ticket_id')}: {result.get('ticket_url', '')}".strip()
+    if result.get("note"):
+        reply += f"\n_{result['note']}_"
+    return reply
 
 
 def _get_redaction_fields() -> set[str]:
@@ -1254,16 +1329,13 @@ async def _run_chat(message: str, user: str, role: str, check_config: bool = Tru
 # ---------------------------------------------------------------------------
 
 def _parse_ticket_command(text: str) -> Optional[dict]:
+    # Only "ticket …" / "create ticket …" create tickets; a question that merely mentions
+    # a ticket ("why wasn't the ticket created?") is a normal chat message.
     normalized = text.strip()
-    lower = normalized.lower()
-    if "ticket" not in lower:
+    match = re.match(r"(?i)(create\s+)?ticket\b", normalized)
+    if not match:
         return None
-    if lower.startswith("ticket "):
-        remainder = normalized[len("ticket"):].strip()
-    elif lower.startswith("create ticket "):
-        remainder = normalized[len("create ticket"):].strip()
-    else:
-        remainder = re.sub(r"(?i)ticket", "", normalized).strip()
+    remainder = normalized[match.end():].strip()
 
     if "|" in remainder:
         parts = [p.strip() for p in remainder.split("|")]
@@ -1473,7 +1545,8 @@ async def _auto_investigate(alert: dict, channel: str, slack_thread: Optional[tu
             source="alert",
         )
         reply = result.get("reply", "")
-        _save_alert(channel, "analysis", {"analysis": reply, "investigation_id": result.get("investigation_id")})
+        _save_alert(channel, "analysis", {"analysis": reply, "investigation_id": result.get("investigation_id"),
+                                          "device": alert.get("device"), "interface": alert.get("interface")})
         if slack_thread:
             error = await asyncio.to_thread(
                 get_slack_adapter().send_thread_reply, slack_thread[0], slack_thread[1],
@@ -1569,6 +1642,10 @@ async def alertmanager_webhook(request: Request):
 
 # Background work that must outlive the request (kept referenced until done).
 _background_jobs: set[asyncio.Task] = set()
+
+# Slack button clicks being handled: (channel, action_id, value). A repeat click while one
+# runs gets "already working" instead of starting a duplicate investigation.
+_actions_in_progress: set[tuple[str, str, str]] = set()
 
 
 def _keep_alive(task: asyncio.Task) -> None:
@@ -1736,6 +1813,7 @@ async def slack_command(request: Request, background_tasks: BackgroundTasks):
             ticket_payload = _ticket_from_alert(alert, analysis=analysis)
 
     investigate_text = None
+    investigated_alert: dict[str, Any] = {}
     if text.strip().lower().startswith("investigate"):
         remainder = text.strip()[len("investigate"):].strip()
         if remainder:
@@ -1746,6 +1824,7 @@ async def slack_command(request: Request, background_tasks: BackgroundTasks):
             if not alert and channel_name:
                 alert = _get_latest_alert(channel_name, exclude_source="analysis")
             investigate_text = _format_alert_context(alert) if alert else ""
+            investigated_alert = alert or {}
 
     if response_url:
         # Slack needs an ack within 3s — do the work after responding, on this
@@ -1763,29 +1842,11 @@ async def slack_command(request: Request, background_tasks: BackgroundTasks):
                         )
                         reply_text = result["reply"]
                         channel_key = channel_id or channel_name or "default"
-                        _save_alert(channel_key, "analysis", {"analysis": reply_text})
-                elif ticket_payload and _dispatcher:
-                    # Route through _run_chat so the LLM has access to the
-                    # prior investigation in memory and fills the description
-                    # correctly — direct dispatcher.call_tool bypasses the LLM
-                    # and produces empty/incomplete ticket descriptions.
-                    channel_key = channel_id or channel_name or "default"
-                    analysis = _get_latest_analysis(channel_key)
-                    if analysis:
-                        ticket_prompt = (
-                            f"Create a Jira ticket for the investigation you just completed. "
-                            f"The ticket summary should be: {ticket_payload.get('summary', 'Network incident')}. "
-                            f"Fill the description with all investigation findings, evidence, "
-                            f"severity, and recommended next steps from the investigation."
-                        )
-                    else:
-                        ticket_prompt = (
-                            f"Create a Jira ticket: summary={ticket_payload.get('summary', 'Network incident')}, "
-                            f"description={ticket_payload.get('description', '')}, "
-                            f"priority={ticket_payload.get('priority', 'Medium')}."
-                        )
-                    ticket_result = await _run_chat(ticket_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False, source="slack")
-                    reply_text = ticket_result.get("reply", "Ticket creation failed.")
+                        _save_alert(channel_key, "analysis", {"analysis": reply_text,
+                                                              "device": investigated_alert.get("device"),
+                                                              "interface": investigated_alert.get("interface")})
+                elif ticket_payload:
+                    reply_text = await _slash_ticket(ticket_payload, channel_id or channel_name or "default", user_name)
                 else:
                     result = await _run_chat(text, user_name, get_setting("SLACK_ROLE", "noc"), source="slack")
                     reply_text = result["reply"]
@@ -1817,17 +1878,9 @@ async def slack_command(request: Request, background_tasks: BackgroundTasks):
         )
         return {"response_type": "in_channel", "text": result["reply"]}
 
-    if ticket_payload and _dispatcher:
-        ticket_result = await _dispatcher.call_tool("jira_create_ticket", ticket_payload)
-        if "error" in ticket_result:
-            return {
-                "response_type": "ephemeral",
-                "text": f"Ticket creation failed: {ticket_result['error']}",
-            }
-        return {
-            "response_type": "in_channel",
-            "text": f"Ticket created: {ticket_result.get('ticket_id')} {ticket_result.get('ticket_url', '')}".strip(),
-        }
+    if ticket_payload:
+        reply = await _slash_ticket(ticket_payload, channel_id or channel_name or "default", user_name)
+        return {"response_type": "in_channel" if reply.startswith("🎫") else "ephemeral", "text": reply}
 
     result = await _run_chat(text, user_name, get_setting("SLACK_ROLE", "noc"), source="slack")
     return {"response_type": "in_channel", "text": result["reply"]}
@@ -1885,8 +1938,26 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
     severity   = parts[2] if len(parts) > 2 else ""
     alert_text = parts[3] if len(parts) > 3 else value
 
+    # Slack ignores the HTTP response body for button clicks: feedback must go to response_url.
+    async def _notify(text: str) -> None:
+        if not response_url:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(response_url, json={"response_type": "ephemeral", "replace_original": False,
+                                                      "text": text})
+        except Exception:
+            logger.exception("Slack action acknowledgement failed.")
+
+    action_key = (channel, action_id, value)
+    if action_key in _actions_in_progress:
+        background_tasks.add_task(_notify, "⏳ Already working on this — the result will appear here shortly.")
+        return JSONResponse({"ok": True})
+
     async def _do_action() -> None:
         reply_text = "An error occurred."
+        await _notify("🔍 Investigating — this usually takes 30–60 seconds." if action_id == "netcopilot_investigate"
+                      else "🎫 Creating the ticket…")
         try:
             if action_id == "netcopilot_investigate":
                 context = alert_text
@@ -1902,7 +1973,7 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                 inv_prompt = _alert_investigation_prompt(context)
                 result = await _run_chat(inv_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False, source="slack")
                 reply_text = result["reply"]
-                _save_alert(channel, "analysis", {"analysis": reply_text})
+                _save_alert(channel, "analysis", {"analysis": reply_text, "device": device, "interface": interface})
 
                 # Post findings with a Create Ticket button and return early
                 if response_url:
@@ -1922,55 +1993,28 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                 return
 
             elif action_id == "netcopilot_create_ticket":
-                analysis = _get_latest_analysis(channel)
-
-                # If no analysis or analysis is incomplete (SSH failed etc),
-                # run a fresh investigation first so the ticket has real data
-                _incomplete_markers = (
-                    "unable to retrieve",
-                    "no health data",
-                    "connection error",
-                    "ssh",
-                    "not enough data",
-                    "no detailed health",
-                    "could not",
-                    "failed to",
-                    "no specific evidence",
-                    "automated playbook ran",
-                    "no supporting device data",
-                    "circuit is open",
-                )
-                analysis_incomplete = (
-                    not analysis
-                    or any(m in analysis.lower() for m in _incomplete_markers)
-                )
-
-                if analysis_incomplete:
-                    # Re-investigate then ticket in one LLM call
-                    context = alert_text
-                    if device:    context += f" device={device}"
-                    if interface: context += f" interface={interface}"
-                    if severity:  context += f" severity={severity}"
-                    if device:
-                        from adapters.devices.pool import get_pool
-                        get_pool().force_probe(device)
-                    inv_result = await _run_chat(
-                        _alert_investigation_prompt(context),
-                        user_name, get_setting("SLACK_ROLE", "noc"), check_config=False, source="slack",
-                    )
-                    analysis = inv_result["reply"]
-                    _save_alert(channel, "analysis", {"analysis": analysis})
-                # The findings are passed explicitly: the investigation may have been run by
-                # someone else or by the automatic investigator, so it is not in this user's memory.
-                ticket_prompt = (
-                    f"Create a Jira ticket for this alert. "
-                    f"Alert: {alert_text} (device={device}, interface={interface}, severity={severity}). "
-                    f"Fill the description with the investigation findings, evidence, severity and next steps.\n\n"
-                    f"Investigation findings:\n{(analysis or '')[:6000]}"
-                )
-
-                result = await _run_chat(ticket_prompt, user_name, get_setting("SLACK_ROLE", "noc"), check_config=False, source="slack")
-                reply_text = result.get("reply", "Ticket creation failed.")
+                reply_text = _slack_ticket_denied() or ""
+                if not reply_text:
+                    # Reuse this alert's investigation; only investigate when there is none yet,
+                    # so the ticket always carries evidence (including "could not verify" findings).
+                    analysis = _get_latest_analysis(channel, device=device, interface=interface)
+                    if not analysis:
+                        context = alert_text
+                        if device:    context += f" device={device}"
+                        if interface: context += f" interface={interface}"
+                        if severity:  context += f" severity={severity}"
+                        if device:
+                            from adapters.devices.pool import get_pool
+                            get_pool().force_probe(device)
+                        inv_result = await _run_chat(
+                            _alert_investigation_prompt(context),
+                            user_name, get_setting("SLACK_ROLE", "noc"), check_config=False, source="slack",
+                        )
+                        analysis = inv_result["reply"]
+                        _save_alert(channel, "analysis", {"analysis": analysis, "device": device, "interface": interface})
+                    alert = {"text": alert_text, "device": device, "interface": interface, "severity": severity}
+                    ticket = _ticket_from_alert({k: v for k, v in alert.items() if v}, analysis=analysis)
+                    reply_text = await _create_slack_ticket(ticket, user_name)
         except Exception:
             logger.exception("Slack action handler failed.")
 
@@ -1979,22 +2023,20 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
                 async with httpx.AsyncClient(timeout=10) as client:
                     await client.post(
                         response_url,
-                        json={"response_type": "in_channel", "text": reply_text},
+                        json={"response_type": "in_channel", "replace_original": False, "text": reply_text},
                     )
             except Exception:
                 logger.exception("Slack action response_url post failed.")
 
-    background_tasks.add_task(_do_action)
+    async def _run_action() -> None:
+        try:
+            await _do_action()
+        finally:
+            _actions_in_progress.discard(action_key)
 
-    # Immediate ack — must be within 3 seconds
-    if action_id == "netcopilot_investigate":
-        ack = "🔍 Investigating alert..."
-    elif action_id == "netcopilot_create_ticket":
-        ack = "🎫 Creating ticket..."
-    else:
-        ack = "Working on it..."
-
-    return JSONResponse({"response_type": "ephemeral", "text": ack})
+    _actions_in_progress.add(action_key)  # before responding, so a quick second click is caught
+    background_tasks.add_task(_run_action)
+    return JSONResponse({"ok": True})  # Slack needs a 200 within 3 s; feedback goes via response_url
 
 
 # ---------------------------------------------------------------------------

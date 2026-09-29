@@ -136,24 +136,120 @@ def test_devices_endpoint_lists_names_without_addresses():
     assert all("host" not in d for d in devices)
 
 
-def test_ticket_button_passes_findings_explicitly(monkeypatch):
-    """A ticket created from Slack must carry the stored investigation, not rely on chat memory."""
-    captured = []
-
-    async def fake_run_chat(message, user, role, check_config=True, source="api"):
-        captured.append(message)
-        return {"reply": "Ticket NOC-1 created", "investigation_id": "x"}
-
-    monkeypatch.setattr(appmod, "_run_chat", fake_run_chat)
-    monkeypatch.setattr(appmod, "get_slack_adapter", lambda: FakeSlack())
-    appmod._save_alert("C9", "analysis", {"analysis": "Far end pe2 xe-0/0/1 is admin down (commit by bob)."})
+def _click(action_id, value, channel="C9"):
     import json
     from urllib.parse import urlencode
-    payload = {"actions": [{"action_id": "netcopilot_create_ticket", "value": "pe1|ge-0/0/1|critical|Link down"}],
-               "user": {"username": "carol"}, "channel": {"id": "C9"}, "response_url": ""}
+    payload = {"actions": [{"action_id": action_id, "value": value}],
+               "user": {"username": "carol"}, "channel": {"id": channel}, "response_url": ""}
     with TestClient(appmod.app) as client:
-        r = client.post("/slack/actions", content=urlencode({"payload": json.dumps(payload)}),
-                        headers={"Content-Type": "application/x-www-form-urlencoded"})
-    assert r.status_code == 200
-    assert _wait_for(lambda: captured)
-    assert "Far end pe2 xe-0/0/1 is admin down" in captured[-1]
+        return client.post("/slack/actions", content=urlencode({"payload": json.dumps(payload)}),
+                           headers={"Content-Type": "application/x-www-form-urlencoded"})
+
+
+@pytest.fixture
+def jira_calls(monkeypatch):
+    """Record jira_create_ticket calls made through the dispatcher; nothing reaches Jira."""
+    from adapters.integrations import jira
+
+    calls = []
+
+    async def fake_create_ticket(**kwargs):
+        calls.append(kwargs)
+        return {"ticket_id": "KAN-7", "ticket_url": "https://example.atlassian.net/browse/KAN-7"}
+
+    monkeypatch.setitem(jira.TOOLS, "create_ticket", fake_create_ticket)
+    return calls
+
+
+def test_ticket_button_files_the_stored_findings_directly(monkeypatch, jira_calls):
+    """The button creates the ticket itself from this alert's investigation: no second investigation, no LLM."""
+    chats, posted = [], []
+
+    async def fake_run_chat(*args, **kwargs):
+        chats.append(args)
+        return {"reply": "unused"}
+
+    monkeypatch.setenv("SLACK_ROLE", "noc-ticket")
+    monkeypatch.setattr(appmod, "_run_chat", fake_run_chat)
+    monkeypatch.setattr(appmod, "_audit_log", lambda payload: posted.append(payload))
+    appmod._save_alert("C9", "analysis", {"analysis": "Other device: sw1 fan failed.", "device": "sw1"})
+    appmod._save_alert("C9", "analysis", {"analysis": "Far end pe2 xe-0/0/1 is admin down (could not reach bob).",
+                                          "device": "pe1", "interface": "ge-0/0/1"})
+    appmod._save_alert("C9", "analysis", {"analysis": "Unrelated: xr1 CPU high.", "device": "xr1"})
+
+    assert _click("netcopilot_create_ticket", "pe1|ge-0/0/1|critical|Link down on pe1").status_code == 200
+    assert _wait_for(lambda: jira_calls)
+    ticket = jira_calls[0]
+    assert ticket["summary"] == "Link down on pe1 ge-0/0/1"            # device named once
+    assert "Far end pe2 xe-0/0/1 is admin down" in ticket["description"]  # this alert's findings…
+    assert "xr1 CPU high" not in ticket["description"]                 # …not the channel's latest
+    assert ticket["priority"] == "Highest"                             # critical → Highest
+    assert chats == []                                                 # "could not" no longer re-investigates
+    assert posted[-1]["event"] == "slack_ticket" and posted[-1]["ticket"] == "KAN-7"
+
+
+def test_ticket_button_explains_missing_jira_role(monkeypatch, jira_calls):
+    chats = []
+
+    async def fake_run_chat(*args, **kwargs):
+        chats.append(args)
+        return {"reply": "unused"}
+
+    replies = []
+    monkeypatch.setenv("SLACK_ROLE", "noc")
+    monkeypatch.setattr(appmod, "_run_chat", fake_run_chat)
+    original = appmod._slack_ticket_denied
+    monkeypatch.setattr(appmod, "_slack_ticket_denied", lambda: replies.append(original()) or replies[-1])
+    assert _click("netcopilot_create_ticket", "pe1|ge-0/0/1|critical|Link down").status_code == 200
+    assert _wait_for(lambda: replies)
+    time.sleep(0.2)
+    assert "SLACK_ROLE" in replies[0] and "noc-ticket" in replies[0]
+    assert jira_calls == [] and chats == []                            # no investigation, no ticket
+
+
+def test_repeat_click_does_not_start_a_second_investigation(monkeypatch):
+    chats = []
+
+    async def fake_run_chat(*args, **kwargs):
+        chats.append(args)
+        return {"reply": "done"}
+
+    monkeypatch.setattr(appmod, "_run_chat", fake_run_chat)
+    value = "pe1|ge-0/0/1|critical|Link down"
+    appmod._actions_in_progress.add(("C9", "netcopilot_investigate", value))  # first click still running
+    try:
+        assert _click("netcopilot_investigate", value).status_code == 200
+        time.sleep(0.3)
+        assert chats == []
+    finally:
+        appmod._actions_in_progress.clear()
+    assert _click("netcopilot_investigate", value).status_code == 200    # once finished, clicks work again
+    assert _wait_for(lambda: chats)
+    assert appmod._actions_in_progress == set()
+
+
+def test_slash_ticket_command_respects_the_jira_role(monkeypatch, jira_calls):
+    from urllib.parse import urlencode
+    body = urlencode({"text": "ticket BGP flapping on pe1", "user_name": "carol", "channel_id": "C9"})
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    monkeypatch.setenv("SLACK_ROLE", "noc")
+    with TestClient(appmod.app) as client:
+        denied = client.post("/slack/command", content=body, headers=headers).json()
+    assert "noc-ticket" in denied["text"] and jira_calls == []
+
+    monkeypatch.setenv("SLACK_ROLE", "noc-ticket")
+    with TestClient(appmod.app) as client:
+        created = client.post("/slack/command", content=body, headers=headers).json()
+    assert created["text"].startswith("🎫 Created KAN-7") and jira_calls[0]["summary"] == "BGP flapping on pe1"
+
+
+@pytest.mark.parametrize("text,summary", [
+    ("ticket BGP flapping on pe1", "BGP flapping on pe1"),
+    ("Create ticket fan failure on sw1 | PSU 2 fan stopped", "fan failure on sw1"),
+    ("ticket", "NetCopilot ticket"),                     # bare: filled from the channel's latest alert
+    ("why wasn't the ticket created?", None),            # a question, not a ticket request
+    ("show tickets for pe1", None),
+])
+def test_only_explicit_ticket_commands_create_tickets(text, summary):
+    parsed = appmod._parse_ticket_command(text)
+    assert (parsed or {}).get("summary") == summary

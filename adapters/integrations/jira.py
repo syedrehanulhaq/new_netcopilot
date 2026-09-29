@@ -146,11 +146,18 @@ def _normalize_label(value: str) -> str:
 
 
 def _doc_text(text: str) -> dict:
-    """Jira ADF paragraph node."""
-    return {
-        "type": "doc", "version": 1,
-        "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}],
-    }
+    """Jira ADF document: blank lines separate paragraphs, single newlines become line breaks."""
+    paragraphs = []
+    for block in re.split(r"\n\s*\n", str(text or "").strip()):
+        content: list = []
+        for i, line in enumerate(block.split("\n")):
+            if i:
+                content.append({"type": "hardBreak"})
+            if line:
+                content.append({"type": "text", "text": line})
+        if content:
+            paragraphs.append({"type": "paragraph", "content": content})
+    return {"type": "doc", "version": 1, "content": paragraphs or [{"type": "paragraph", "content": []}]}
 
 
 # ---------------------------------------------------------------------------
