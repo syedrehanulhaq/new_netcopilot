@@ -30,7 +30,7 @@ logger = logging.getLogger("netcopilot.adapters.cisco")
 # SSH sessions — reused across tool calls, each checked out exclusively
 # ---------------------------------------------------------------------------
 
-_SESSIONS = SSHSessionCache("cisco")
+_SESSIONS = SSHSessionCache("cisco", target=resolve_host)
 
 
 def _connect(device_name: str):

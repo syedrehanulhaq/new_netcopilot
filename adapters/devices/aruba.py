@@ -39,7 +39,7 @@ logger = logging.getLogger("netcopilot.adapters.aruba")
 # SSH sessions — reused across tool calls, each checked out exclusively
 # ---------------------------------------------------------------------------
 
-_SESSIONS = SSHSessionCache("aruba")
+_SESSIONS = SSHSessionCache("aruba", target=resolve_host)
 
 
 def _device_type(device_name: str) -> str:

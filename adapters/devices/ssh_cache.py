@@ -38,16 +38,27 @@ def _disconnect(conn: Any) -> None:
 
 class SSHSessionCache:
     def __init__(self, name: str, ttl: float = 90.0, max_idle: int = 20,
-                 alive: Optional[Callable[[Any], bool]] = None) -> None:
+                 alive: Optional[Callable[[Any], bool]] = None,
+                 target: Optional[Callable[[str], Any]] = None) -> None:
         self.name = name
         self.ttl = ttl
         self.max_idle = max_idle
-        self.alive = alive  # optional liveness check applied when a session is checked out
+        self.alive = alive    # optional liveness check applied when a session is checked out
+        self.target = target  # device -> its current address: after an inventory change, old sessions are never reused
         self._idle: dict[str, list[tuple[Any, float]]] = {}
         self._lock = threading.Lock()
 
+    def _key(self, device: str) -> str:
+        if self.target is None:
+            return device
+        try:
+            return f"{device}@{self.target(device)}"
+        except Exception:
+            return device
+
     def checkout(self, device: str) -> Optional[Any]:
         """Remove and return a fresh-enough idle session for device, or None."""
+        device = self._key(device)
         stale: list[Any] = []
         conn = None
         now = time.monotonic()
@@ -67,6 +78,7 @@ class SSHSessionCache:
 
     def checkin(self, device: str, conn: Any) -> None:
         """Return a healthy session to the idle pool, evicting the oldest if full."""
+        device = self._key(device)
         evicted: list[Any] = []
         with self._lock:
             while sum(len(v) for v in self._idle.values()) >= self.max_idle:
@@ -86,6 +98,7 @@ class SSHSessionCache:
 
     def discard(self, device: str) -> None:
         """Close every idle session for device (e.g. after one turned out to be dead)."""
+        device = self._key(device)
         with self._lock:
             entries = self._idle.pop(device, [])
         for conn, _ in entries:
@@ -94,7 +107,7 @@ class SSHSessionCache:
     def idle_count(self, device: Optional[str] = None) -> int:
         with self._lock:
             if device is not None:
-                return len(self._idle.get(device, []))
+                return len(self._idle.get(self._key(device), []))
             return sum(len(v) for v in self._idle.values())
 
     @contextmanager

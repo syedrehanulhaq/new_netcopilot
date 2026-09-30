@@ -44,7 +44,15 @@ def _netconf_alive(dev) -> bool:
 
 # NETCONF sessions are reused between calls: opening one (SSH + NETCONF hello)
 # costs ~2 s, the RPC itself well under 1 s. Exclusive checkout, as for SSH.
-_SESSIONS = SSHSessionCache("junos", alive=_netconf_alive)
+def _netconf_target(device_name: str) -> tuple[str, int]:
+    """(host, NETCONF port): the device's netconf_port wins, then its port (NETCONF over SSH), then NETCONF_PORT."""
+    host, port = resolve_host(device_name)
+    netconf_port = int((get_device_info(device_name) or {}).get("netconf_port")
+                       or port or get_secret("NETCONF_PORT", "830"))
+    return host, netconf_port
+
+
+_SESSIONS = SSHSessionCache("junos", alive=_netconf_alive, target=_netconf_target)
 
 
 def _is_transport_error(exc: BaseException) -> bool:
@@ -128,16 +136,12 @@ def _connect(device_name: str):
         ValueError   if device is not in the registry
         RuntimeError if credentials are missing or connection fails
     """
-    host, port = resolve_host(device_name)
+    host, netconf_port = _netconf_target(device_name)
 
     user = get_secret("JUNIPER_USER", "")
     passwd = get_secret("JUNIPER_PASS", "")
     if not user or not passwd:
         raise RuntimeError("JUNIPER_USER or JUNIPER_PASS not configured.")
-
-    # The device's netconf_port wins; otherwise its port (NETCONF over SSH), then NETCONF_PORT.
-    netconf_port = int((get_device_info(device_name) or {}).get("netconf_port")
-                       or port or get_secret("NETCONF_PORT", "830"))
     timeout = int(get_secret("NETCONF_TIMEOUT", "30"))
 
     def _open():

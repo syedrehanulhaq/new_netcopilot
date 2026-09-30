@@ -31,7 +31,7 @@ logger = logging.getLogger("netcopilot.adapters.nokia")
 # SSH sessions — reused across tool calls, each checked out exclusively
 # ---------------------------------------------------------------------------
 
-_SESSIONS = SSHSessionCache("nokia")
+_SESSIONS = SSHSessionCache("nokia", target=resolve_host)
 
 
 def _connect(device_name: str):

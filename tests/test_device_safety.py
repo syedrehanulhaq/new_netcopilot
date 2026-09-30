@@ -237,7 +237,8 @@ def fake_junos(monkeypatch):
     monkeypatch.setenv("JUNIPER_USER", "u")
     monkeypatch.setenv("JUNIPER_PASS", "p")
     monkeypatch.setattr(jnpr.junos, "Device", _FakeJunosDevice)
-    monkeypatch.setattr(junos, "_SESSIONS", SSHSessionCache("junos-test", alive=junos._netconf_alive))
+    monkeypatch.setattr(junos, "_SESSIONS", SSHSessionCache("junos-test", alive=junos._netconf_alive,
+                                                         target=junos._netconf_target))
     _FakeJunosDevice.opened = 0
     return junos
 
@@ -268,8 +269,9 @@ def test_junos_retries_once_when_a_cached_session_is_dead(fake_junos):
             return dev.show()
 
     assert asyncio.run(junos._run_tool("pe1", call)) == "ok"  # opens a session and caches it
-    for conn, _ in junos._SESSIONS._idle["pe1"]:
-        conn.dead = True  # the device dropped it, but ncclient hasn't noticed yet
+    for entries in junos._SESSIONS._idle.values():
+        for conn, _ in entries:
+            conn.dead = True  # the device dropped it, but ncclient hasn't noticed yet
     assert asyncio.run(junos._run_tool("pe1", call)) == "ok"  # fails on the cached one, retried fresh
     assert _FakeJunosDevice.opened == 2
 
@@ -287,3 +289,22 @@ def test_junos_rpc_errors_are_not_retried(fake_junos):
         pass  # a cached session exists
     result = asyncio.run(junos._run_tool("pe1", call))
     assert "interface not found" in result["error"] and len(calls) == 1
+
+
+def test_changing_a_device_address_never_reuses_the_old_session(fake_junos):
+    from adapters.devices import registry
+    from conftest import write_devices
+
+    junos = fake_junos
+    write_devices({"devices": {"lab": {"host": "192.0.2.50", "port": 37002, "netconf_port": 37000, "vendor": "junos"}}})
+    registry.reload_registry()
+    with junos._connect("lab") as first:
+        pass
+    # new lab reservation: same name, new address
+    write_devices({"devices": {"lab": {"host": "192.0.2.51", "port": 42002, "netconf_port": 42000, "vendor": "junos"}}})
+    registry.reload_registry()
+    with junos._connect("lab") as second:
+        assert second is not first
+    assert _FakeJunosDevice.opened == 2
+    with junos._connect("lab") as third:
+        assert third is second  # sessions to the new address are still reused

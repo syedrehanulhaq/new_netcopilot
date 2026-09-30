@@ -67,9 +67,9 @@ devices:
     platform: junos
 
   vmx-addr-0:
-    host: 66.129.235.102
-    port: 37002
-    netconf_port: 37000
+    host: 66.129.235.100
+    port: 42002
+    netconf_port: 42000
     vendor: junos
     platform: junos
     site: vlabs
