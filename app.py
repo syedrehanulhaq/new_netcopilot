@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlencode
 
 import httpx
@@ -134,11 +134,12 @@ if not audit_logger.handlers:
 
 _mcp_client: Optional[MCPClient] = None
 _dispatcher: Optional[ToolDispatcher] = None
+_slack_socket: Any = None  # adapters.chat.slack_socket.SlackSocketMode when SLACK_APP_TOKEN is set
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _mcp_client, _dispatcher
+    global _mcp_client, _dispatcher, _slack_socket
     for check in guardrails.posture_report(AUTH0_DOMAIN):
         if check["status"] in ("warn", "fail"):
             logger.warning("security posture [%s] %s: %s %s", check["status"], check["title"],
@@ -157,8 +158,40 @@ async def lifespan(app: FastAPI):
         APP_VERSION,
         len(_mcp_client._connections),
     )
+    app_token = get_setting("SLACK_APP_TOKEN", "")
+    if app_token:
+        from adapters.chat.slack_socket import SlackSocketMode
+
+        _slack_socket = SlackSocketMode(app_token, _slack_socket_command, _slack_socket_action)
+        await _slack_socket.start()
     yield
+    if _slack_socket is not None:
+        await _slack_socket.stop()
     await _mcp_client.stop()
+
+
+class _TaskScheduler:
+    """BackgroundTasks-compatible, for Socket Mode (no HTTP response to run work after): runs work as tasks."""
+
+    def add_task(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+        _keep_alive(asyncio.ensure_future(func(*args, **kwargs)))
+
+
+async def _slack_socket_command(fields: dict) -> dict:
+    try:
+        _enforce_rate_limit("slack")
+    except HTTPException as exc:
+        return {"response_type": "ephemeral", "text": str(exc.detail)}
+    return await _slack_command_core(fields, _TaskScheduler())
+
+
+async def _slack_socket_action(payload: dict) -> None:
+    try:
+        _enforce_rate_limit("slack-actions")
+    except HTTPException:
+        logger.warning("Slack button click dropped: rate limited.")
+        return
+    await _slack_action_core(payload, _TaskScheduler())
 
 
 _API_DOCS = get_setting_bool("ENABLE_API_DOCS", True)
@@ -294,6 +327,8 @@ _SETTINGS_SCHEMA = [
     {"key": "SLACK_VERIFICATION_TOKEN", "label": "Slack verification token", "category": "Slack", "secret": True},
     {"key": "SLACK_SIGNING_SECRET", "label": "Slack signing secret", "category": "Slack", "secret": True},
     {"key": "SLACK_BOT_TOKEN", "label": "Slack bot token", "category": "Slack", "secret": True},
+    {"key": "SLACK_APP_TOKEN", "label": "Slack app-level token (xapp-…, enables Socket Mode: no public URL needed)",
+     "category": "Slack", "secret": True},
     {"key": "SLACK_ALERT_CHANNEL", "label": "Slack alert channel", "category": "Slack"},
     {"key": "SLACK_ROLE", "label": "Slack default role", "category": "Slack"},
     {"key": "TEAMS_HMAC_SECRET", "label": "Teams outgoing webhook security token (HMAC)", "category": "Teams", "secret": True},
@@ -1815,11 +1850,19 @@ async def slack_command(request: Request, background_tasks: BackgroundTasks):
     form = parse_qs(raw_body.decode("utf-8"))
     token = (form.get("token") or [""])[0]
     _verify_slack_request(request, raw_body, legacy_token=token)
-    user_name = (form.get("user_name") or ["slack"])[0]
-    text = (form.get("text") or [""])[0]
-    response_url = (form.get("response_url") or [""])[0]
-    channel_id = (form.get("channel_id") or [""])[0]
-    channel_name = (form.get("channel_name") or [""])[0]
+    return await _slack_command_core({k: v[0] for k, v in form.items() if v}, background_tasks)
+
+
+async def _slack_command_core(fields: dict[str, Any], background_tasks: Any) -> dict:
+    """
+    A /netcopilot slash command, from the HTTP endpoint or Socket Mode (same fields).
+    Returns the immediate reply; longer work is queued on background_tasks.
+    """
+    user_name = str(fields.get("user_name") or "slack")
+    text = str(fields.get("text") or "")
+    response_url = str(fields.get("response_url") or "")
+    channel_id = str(fields.get("channel_id") or "")
+    channel_name = str(fields.get("channel_name") or "")
 
     ticket_payload = _parse_ticket_command(text)
     if ticket_payload and ticket_payload.get("summary") == "NetCopilot ticket":
@@ -1936,7 +1979,11 @@ async def slack_actions(request: Request, background_tasks: BackgroundTasks):
     _verify_slack_request(request, raw_body, legacy_token=legacy_token)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid payload JSON.")
+    return await _slack_action_core(payload, background_tasks)
 
+
+async def _slack_action_core(payload: dict[str, Any], background_tasks: Any) -> JSONResponse:
+    """A button click (block_actions), from the HTTP endpoint or Socket Mode. Work runs in the background."""
     actions      = payload.get("actions", [])
     user_info    = payload.get("user", {})
     user_name    = user_info.get("username") or user_info.get("name") or "slack"
@@ -2080,6 +2127,7 @@ async def health():
         "vault_degraded": vault_degraded,
         "backends": backends,
         "integrations_connected": integrations_connected,
+        "slack": await _slack_socket.status() if _slack_socket is not None else {"mode": "http"},
     }
 
 

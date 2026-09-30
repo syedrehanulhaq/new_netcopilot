@@ -9,6 +9,8 @@ python-dotenv
 PyYAML
 python-multipart
 itsdangerous
+slack_sdk         # Slack Socket Mode (SLACK_APP_TOKEN): outbound WebSocket, no public URL
+aiohttp           # transport for slack_sdk's asyncio Socket Mode client
 
 # Auth
 authlib

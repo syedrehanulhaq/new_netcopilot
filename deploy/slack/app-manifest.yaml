@@ -1,10 +1,17 @@
 # Slack app manifest for NetCopilot.
 # api.slack.com/apps → Create New App → From a manifest → paste this file.
 #
-# Replace https://netcopilot.example.com with NetCopilot's public HTTPS address
-# (slash command and buttons need Slack to reach it). Posting alerts and
-# investigation results only needs the bot token, so the placeholder is fine
-# until then.
+# Socket Mode (default here): NetCopilot connects out to Slack, so Slack never
+# needs to reach NetCopilot — no public URL, tunnel or inbound firewall rule.
+# After creating the app:
+#   Basic Information → App-Level Tokens → Generate Token and Scopes,
+#   add scope connections:write, and put the xapp-… token in SLACK_APP_TOKEN.
+#   Install the app and put the xoxb-… bot token in SLACK_BOT_TOKEN.
+#
+# To use HTTP instead, set socket_mode_enabled: false and add
+#   url: https://<netcopilot>/slack/command   (under the slash command)
+#   request_url: https://<netcopilot>/slack/actions   (under interactivity)
+# and set SLACK_SIGNING_SECRET.
 #
 # Scopes are the minimum NetCopilot uses:
 #   chat:write  post alerts, investigation results and thread replies
@@ -20,7 +27,6 @@ features:
     always_online: false
   slash_commands:
     - command: /netcopilot
-      url: https://netcopilot.example.com/slack/command
       description: Ask NetCopilot, investigate the latest alert, or open a Jira ticket
       usage_hint: "is BGP up on pe1?  ·  investigate  ·  ticket <summary>"
       should_escape: false
@@ -32,7 +38,6 @@ oauth_config:
 settings:
   interactivity:
     is_enabled: true
-    request_url: https://netcopilot.example.com/slack/actions
   org_deploy_enabled: false
-  socket_mode_enabled: false
+  socket_mode_enabled: true
   token_rotation_enabled: false

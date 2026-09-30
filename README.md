@@ -59,9 +59,13 @@ playbooks, audit, security posture).
 
 ## Integrations
 
-- **Slack:** slash command → `POST /slack/command`, interactivity → `POST /slack/actions`;
-  set `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_ALERT_CHANNEL`.
-  Create the app from `deploy/slack/app-manifest.yaml` (minimum scopes: `chat:write`, `commands`).
+- **Slack:** create the app from `deploy/slack/app-manifest.yaml` (minimum scopes: `chat:write`,
+  `commands`) and set `SLACK_BOT_TOKEN` and `SLACK_ALERT_CHANNEL`. Then either
+  - **Socket Mode (recommended):** set `SLACK_APP_TOKEN` (app-level token, scope `connections:write`).
+    NetCopilot connects out to Slack; no public URL, tunnel or inbound firewall rule. `/health` shows
+    `"slack": {"mode": "socket", "connected": true}`.
+  - **HTTP:** slash command → `POST /slack/command`, interactivity → `POST /slack/actions`, verified with
+    `SLACK_SIGNING_SECRET`; NetCopilot must be reachable from Slack.
 - **Teams:** outgoing webhook → `POST /teams/webhook`; set `TEAMS_HMAC_SECRET` (the security
   token Teams shows) and `TEAMS_RESULT_WEBHOOK_URL` for answers that take more than 5 s.
 - **Alertmanager:**

@@ -228,13 +228,21 @@ def posture_report(auth0_domain: str) -> list[dict]:
         "" if ingest_token else "Set ALERT_INGEST_TOKEN and configure it in Alertmanager / your NMS.",
     ))
 
-    if get_setting("SLACK_BOT_TOKEN", "") or get_setting("SLACK_SIGNING_SECRET", ""):
+    if get_setting("SLACK_APP_TOKEN", ""):
+        checks.append(_check(
+            "slack", "Slack connection", "pass",
+            "Socket Mode: NetCopilot connects out to Slack, so Slack needs no inbound access "
+            "(no public URL or tunnel).",
+        ))
+    elif get_setting("SLACK_BOT_TOKEN", "") or get_setting("SLACK_SIGNING_SECRET", ""):
         signing = bool(get_setting("SLACK_SIGNING_SECRET", ""))
         checks.append(_check(
             "slack", "Slack request signing", "pass" if signing else "fail",
-            "Slack requests are verified with the signing secret (HMAC, 5-minute replay window)."
+            "Slack requests are verified with the signing secret (HMAC, 5-minute replay window). They need a "
+            "public URL to NetCopilot; Socket Mode (SLACK_APP_TOKEN) avoids exposing it."
             if signing else "Slack is configured without SLACK_SIGNING_SECRET.",
-            "" if signing else "Set SLACK_SIGNING_SECRET from the Slack app settings.",
+            "" if signing else "Set SLACK_SIGNING_SECRET from the Slack app settings, or use Socket Mode "
+                               "(SLACK_APP_TOKEN).",
         ))
 
     deny = get_setting("TOOL_DENYLIST", "")
