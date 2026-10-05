@@ -507,7 +507,8 @@ function escapeRegExp(text) {
 // The selected device is added to the question unless the question already names it.
 function withDeviceContext(message) {
   const device = deviceSelect.value;
-  if (!device || new RegExp(`(^|[^\\w.-])${escapeRegExp(device)}($|[^\\w.-])`, "i").test(message)) {
+  // A trailing "." ends the name only at the end of a sentence ("…on pe1."), not in "pe1.lab.net".
+  if (!device || new RegExp(`(^|[^\\w.-])${escapeRegExp(device)}($|[^\\w.-]|\\.(?=\\s|$))`, "i").test(message)) {
     return { text: message, device: "" };
   }
   return { text: `Device: ${device}\n${message}`, device };
